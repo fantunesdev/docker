@@ -30,12 +30,12 @@ services:
   mysql-myfin:
     image: mysql:latest
     environment:
-      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
-      MYSQL_USER: "${MYSQL_USER}"
-      MYSQL_PASSWORD: "${MYSQL_PASSWORD}"
-      MYSQL_DATABASE: "${MYSQL_DATABASE}"
+      MYSQL_ROOT_PASSWORD: "${MYFIN_MYSQL_ROOT_PASSWORD}"
+      MYSQL_USER: "${MYFIN_MYSQL_USER}"
+      MYSQL_PASSWORD: "${MYFIN_MYSQL_PASSWORD}"
+      MYSQL_DATABASE: "${MYFIN_MYSQL_DATABASE}"
     ports:
-      - "3306:3306"
+      - "33060:3306"
     volumes:
       - mysql-myfin-vol:/var/lib/mysql
       
