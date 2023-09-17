@@ -1,6 +1,6 @@
 FROM python:3.11-alpine
 
-RUN apk update && apk add --no-cache mysql-dev gcc libc-dev linux-headers musl-dev libffi-dev
+RUN apk update && apk add --no-cache mysql-dev gcc libc-dev linux-headers musl-dev libffi-dev postgresql-dev
 
 WORKDIR /myfinance
 
