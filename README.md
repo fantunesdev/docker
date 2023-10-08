@@ -22,4 +22,8 @@ Para inicializar automaticamente a aplicação com o sistema, copie o arquivo my
 > sudo cp myfinance.service /ets/systemd/system/  
 > sudo systemctl daemon-reload  
 > sudo systemctl start myfinance.service  
-> sudo systemctl enable myfinance.service  
+> sudo systemctl enable myfinance.service
+
+### Acessando o MySQL
+
+> mysql -u USUARIO -h 127.0.0.1 -P 3307 -p
