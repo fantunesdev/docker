@@ -1,0 +1,13 @@
+[Unit]
+Description=MyFinance
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/docker-compose -f /home/fernando/git/dev/docker/docker-compose.yml up -d
+ExecStop=/usr/bin/docker-compose -f /home/fernando/git/dev/docker/docker-compose.yml down
+
+[Install]
+WantedBy=multi-user.target

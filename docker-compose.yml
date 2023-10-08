@@ -10,7 +10,7 @@ services:
     build:
       context: .
     ports:
-      - "8000:8000"
+      - "8111:8111"
     environment:
       DEBUG: "${MYFIN_DEBUG}"
       DJANGO: "${MYFIN_DEBUG}"
@@ -35,7 +35,7 @@ services:
       MYSQL_PASSWORD: "${MYFIN_MYSQL_PASSWORD}"
       MYSQL_DATABASE: "${MYFIN_MYSQL_DATABASE}"
     ports:
-      - "33060:3306"
+      - "3307:3306"
     volumes:
       - mysql-myfin-vol:/var/lib/mysql
       
