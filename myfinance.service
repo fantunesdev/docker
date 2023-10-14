@@ -6,8 +6,8 @@ After=docker.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/bin/docker-compose -f /home/fernando/git/dev/docker/docker-compose.yml up -d
-ExecStop=/usr/bin/docker-compose -f /home/fernando/git/dev/docker/docker-compose.yml down
+ExecStart=/usr/bin/docker-compose -f /home/fernando/git/prod/docker_myfinance/docker-compose.yml up -d
+ExecStop=/usr/bin/docker-compose -f /home/fernando/git/prod/docker_myfinance/docker-compose.yml down
 
 [Install]
 WantedBy=multi-user.target
