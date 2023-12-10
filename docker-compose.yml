@@ -26,6 +26,9 @@ services:
       URL: "VAULT_URL"
     depends_on:
       - mysql-myfin
+    networks:
+      myfin-net:
+        ipv4_address: 172.18.0.3
 
   mysql-myfin:
     image: mysql:latest
@@ -38,7 +41,10 @@ services:
       - "3307:3306"
     volumes:
       - mysql-myfin-vol:/var/lib/mysql
-      
+    networks:
+      myfin-net:
+        ipv4_address: 172.18.0.2
+
   nginx-myfin:
     image: nginx:1.19.0-alpine
     volumes:
@@ -49,6 +55,16 @@ services:
       - "80:80"
     depends_on:
       - app-myfin
+    networks:
+      - myfin-net
+
+networks:
+  myfin-net:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.18.0.0/16
 
 volumes:
   mysql-myfin-vol:
