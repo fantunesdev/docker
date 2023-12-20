@@ -10,7 +10,7 @@ services:
     build:
       context: .
     ports:
-      - "8111:8111"
+      - "8121:8111"
     environment:
       DEBUG: "${MYFIN_DEBUG}"
       DJANGO: "${MYFIN_DEBUG}"
@@ -35,7 +35,7 @@ services:
       MYSQL_PASSWORD: "${MYFIN_MYSQL_PASSWORD}"
       MYSQL_DATABASE: "${MYFIN_MYSQL_DATABASE}"
     ports:
-      - "3307:3306"
+      - "3317:3306"
     volumes:
       - mysql-myfin-vol:/var/lib/mysql
       
@@ -46,7 +46,7 @@ services:
       - ./myfinance/media/:/media/
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
     ports:
-      - "80:80"
+      - "808:80"
     depends_on:
       - app-myfin
 
