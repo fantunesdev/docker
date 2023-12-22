@@ -23,3 +23,9 @@ docker-compose down;
 
 # INICIAR O SERVIÇO
 sudo systemctl start myfinance.service;
+
+# SALVAR A VERSÂO
+VERSION="v$DATE";
+export $(cat .env | grep -v ^# | xargs);
+SQL_COMMAND="INSERT INTO statement_version (version) VALUES('$VERSION')";
+mysql -u"$MYFIN_MYSQL_USER" -p"$MYFIN_MYSQL_PASSWORD" -h"$MYFIN_MYSQL_LOCAL" -D "$MYFIN_MYSQL_DATABASE" -P "$MYFIN_MYSQL_LOCAL_PORT" -e "$SQL_COMMAND";
