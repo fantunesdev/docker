@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# DEFINIR VARIÁVEIS
+DATE=$(date +'%Y%m%d');
+ACTUAL_IMAGE=$(docker image ls | grep app-myfin | grep -v bkp | awk -F' ' '{print $3}');
+BKP_IMAGE="docker_myfinance_app-myfin-bkp-v$DATE"
+BASEDIR='/home/fernando/git/prod/docker_myfinance';
+
+# PARAR SERVIÇO
+sudo systemctl stop myfinance.service;
+
+# ATUALIZAR APLICAÇÃO
+cd $BASEDIR;
+cd myfinance;
+git pull;
+cd ..
+
+# BACKUP IMAGEM ANTIGA
+docker tag docker_myfinance_app-myfin $BKP_IMAGE;
+docker image rm docker_myfinance_app-myfin;
+docker-compose up -d;
+docker-compose down;
+
+# INICIAR O SERVIÇO
+sudo systemctl start myfinance.service;
