@@ -3,6 +3,7 @@ version: '3.9'
 services:
   app-myfin:
     volumes:
+      - ${SOURCE_CODE}:/myfinance
       - ./myfinance/statement/static:/myfinance/static
       - ./myfinance/media/:/myfinance/media/
     env_file:
