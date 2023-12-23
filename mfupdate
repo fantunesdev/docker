@@ -24,6 +24,8 @@ docker-compose down;
 # INICIAR O SERVIÇO
 sudo systemctl start myfinance.service;
 
+sleep(20);
+
 # SALVAR A VERSÂO
 VERSION="v$DATE";
 export $(cat .env | grep -v ^# | xargs);
