@@ -24,7 +24,7 @@ docker-compose down;
 # INICIAR O SERVIÇO
 sudo systemctl start myfinance.service;
 
-sleep(20);
+sleep 20;
 
 # SALVAR A VERSÂO
 VERSION="v$DATE";
