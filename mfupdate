@@ -28,8 +28,9 @@ sleep 20;
 
 # SALVAR A VERSÂO
 export $(cat .env | grep -v ^# | xargs);
-SQL_COMMANT="SELECT version FROM statement_version ORDER BY id DESC LIMIT 1";
+SQL_COMMAND="SELECT version FROM statement_version ORDER BY id DESC LIMIT 1";
 VERSION=$(mysql -u"$MYFIN_MYSQL_USER" -p"$MYFIN_MYSQL_PASSWORD" -h"$MYFIN_MYSQL_LOCAL" -D "$MYFIN_MYSQL_DATABASE" -P "$MYFIN_MYSQL_LOCAL_PORT" -e "$SQL_COMMAND" -sN);
 NEW_VERSION=$(echo "$VERSION" | awk -F '.' '{print $1"."$2"."$3+1}')
 SQL_COMMAND="INSERT INTO statement_version (version, date) VALUES('$NEW_VERSION', '$DATE')";
 mysql -u"$MYFIN_MYSQL_USER" -p"$MYFIN_MYSQL_PASSWORD" -h"$MYFIN_MYSQL_LOCAL" -D "$MYFIN_MYSQL_DATABASE" -P "$MYFIN_MYSQL_LOCAL_PORT" -e "$SQL_COMMAND";
+git tag $NEW_VERSION
