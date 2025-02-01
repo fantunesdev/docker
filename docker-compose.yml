@@ -3,7 +3,7 @@ version: '3.9'
 services:
   app-myfin:
     volumes:
-      - ${SOURCE_CODE}:/myfinance
+      - ./myfinance:/myfinance
       - ./myfinance/statement/static:/myfinance/static
       - ./myfinance/media/:/myfinance/media/
     env_file:
@@ -27,6 +27,9 @@ services:
       URL: "VAULT_URL"
     depends_on:
       - mysql-myfin
+    networks:
+      homologacao-myfin-net:
+        ipv4_address: 172.19.0.3
 
   mysql-myfin:
     image: mysql:latest
@@ -39,6 +42,9 @@ services:
       - "3317:3306"
     volumes:
       - mysql-myfin-vol:/var/lib/mysql
+    networks:
+      homologacao-myfin-net:
+        ipv4_address: 172.19.0.2
       
   nginx-myfin:
     image: nginx:1.19.0-alpine
@@ -50,6 +56,16 @@ services:
       - "808:80"
     depends_on:
       - app-myfin
+    networks:
+      - homologacao-myfin-net
+
+networks:
+  homologacao-myfin-net:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.19.0.0/16
 
 volumes:
   mysql-myfin-vol:
