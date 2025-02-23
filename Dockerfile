@@ -10,9 +10,9 @@ RUN apk update && apk add --no-cache \
                         postgresql-dev \
                         vim
 
-WORKDIR /myfinance
+WORKDIR /myprod
 
-COPY myfinance /myfinance
+COPY myprod /myprod
 
 RUN pip install -r requirements.txt
 
