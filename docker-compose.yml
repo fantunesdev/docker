@@ -36,7 +36,7 @@ services:
       MYSQL_PASSWORD: "${MYFIN_MYSQL_PASSWORD}"
       MYSQL_DATABASE: "${MYFIN_MYSQL_DATABASE}"
     ports:
-      - "3307:3306"
+      - "3306:3306"
     volumes:
       - mysql-myfin-vol:/var/lib/mysql
     networks:
