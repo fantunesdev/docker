@@ -12,4 +12,4 @@ python manage.py makemigrations login
 python manage.py migrate login
 python manage.py collectstatic --no-input
 
-gunicorn myfinance.wsgi:application --bind 0.0.0.0:8000
+daphne -b 0.0.0.0 -p 8000 myfinance.asgi:application
