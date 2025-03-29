@@ -22,6 +22,7 @@ services:
       MYSQL_HOST: "${MYFIN_MYSQL_HOST}"
       MYSQL_PORT: "${MYFIN_MYSQL_PORT}"
       URL: "VAULT_URL"
+      ACCESS_TOKEN_EXPIRE_MINUTES: "${ACCESS_TOKEN_EXPIRE_MINUTES}"
     depends_on:
       - mysql-myfin
     networks:
