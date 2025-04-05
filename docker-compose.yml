@@ -72,6 +72,8 @@ services:
     container_name: transaction-classifier
     ports:
       - "8112:8112"
+    environment:
+      ACCESS_TOKEN_EXPIRE_MINUTES: "${MYFIN_DJANGO_ACCESS_TOKEN_EXPIRE_MINUTES}"
     volumes:
       - ./transaction_classifier:/app
     depends_on:
