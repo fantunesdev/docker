@@ -18,4 +18,4 @@ RUN pip install -r requirements.txt
 
 RUN pip install gunicorn
 
-CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "myfinance.asgi:application"]
+CMD ["sh"]
