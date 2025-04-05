@@ -20,4 +20,4 @@ RUN pip install gunicorn
 
 COPY ./entrypoint.sh /
 
-ENTRYPOINT [ "sh", "/entrypoint.sh" ]
+CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "myfinance.asgi:application"]

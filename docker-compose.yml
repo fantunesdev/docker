@@ -29,6 +29,13 @@ services:
       myfin-net:
         ipv4_address: 172.18.0.3
 
+    command: >
+      sh -c "
+        python manage.py migrate &&
+        python manage.py collectstatic --no-input &&
+        daphne -b 0.0.0.0 -p 8000 myfinance.asgi:application
+      "
+
   mysql-myfin:
     image: mysql:latest
     environment:
