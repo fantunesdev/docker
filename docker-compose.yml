@@ -22,7 +22,7 @@ services:
       MYSQL_HOST: "${MYFIN_MYSQL_HOST}"
       MYSQL_PORT: "${MYFIN_MYSQL_PORT}"
       URL: "VAULT_URL"
-      ACCESS_TOKEN_EXPIRE_MINUTES: "${ACCESS_TOKEN_EXPIRE_MINUTES}"
+      ACCESS_TOKEN_EXPIRE_MINUTES: "${MYFIN_DJANGO_ACCESS_TOKEN_EXPIRE_MINUTES}"
     depends_on:
       - mysql-myfin
     networks:
@@ -73,7 +73,10 @@ services:
     ports:
       - "8112:8112"
     environment:
-      ACCESS_TOKEN_EXPIRE_MINUTES: "${MYFIN_DJANGO_ACCESS_TOKEN_EXPIRE_MINUTES}"
+      SECRET_KEY: "${MYFIN_SECRET_KEY}"
+      ALGORITHM: "${TRANSACTION_CLASSIFIER_ALGORITHM}"
+      TOKEN_URL: "${TRANSACTION_CLASSIFIER_TOKEN_URL}"
+      URL: "${TRANSACTION_CLASSIFIER_URL}"
     volumes:
       - ./transaction_classifier:/app
     depends_on:
