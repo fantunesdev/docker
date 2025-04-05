@@ -66,6 +66,20 @@ services:
       myfin-net:
         ipv4_address: 172.18.0.4
 
+  transaction-classifies:
+    build:
+      context: ./transaction_classifier
+    container_name: transaction-classifier
+    ports:
+      - "8112:8112"
+    volumes:
+      - ./transaction_classifier:/app
+    depends_on:
+      - app-myfin
+    networks:
+      myfin-net:
+        ipv4_address: 172.18.0.5
+
 networks:
   myfin-net:
     driver: bridge
