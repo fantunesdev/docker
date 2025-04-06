@@ -23,6 +23,7 @@ services:
       MYSQL_PORT: "${MYFIN_MYSQL_PORT}"
       URL: "VAULT_URL"
       ACCESS_TOKEN_EXPIRE_MINUTES: "${MYFIN_DJANGO_ACCESS_TOKEN_EXPIRE_MINUTES}"
+      ALGORITHM: "${DJANGO_ALGORITHM}"
     depends_on:
       - mysql-myfin
     networks:
