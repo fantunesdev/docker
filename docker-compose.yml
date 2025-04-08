@@ -73,7 +73,7 @@ services:
       myfin-net:
         ipv4_address: 172.18.0.4
 
-  transaction-classifies:
+  transaction-classifier:
     build:
       context: ./transaction_classifier
     container_name: transaction-classifier
@@ -90,7 +90,8 @@ services:
       - app-myfin
     networks:
       myfin-net:
-        ipv4_address: 172.18.0.5
+        ipv4_address: 172.18.0.6
+    restart: unless-stopped
 
 networks:
   myfin-net:
