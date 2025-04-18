@@ -3,6 +3,7 @@ services:
     volumes:
       - ./myfinance/statement/static:/myfinance/static
       - ./myfinance/media/:/myfinance/media/
+      - ./myfinance/logs/:/myfinance/logs/
     build:
       context: .
     ports:
