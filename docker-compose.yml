@@ -3,8 +3,6 @@ services:
     volumes:
       - ./myfinance/statement/static:/myfinance/static
       - ./myfinance/media/:/myfinance/media/
-    env_file:
-      - ./.env
     build:
       context: .
     ports:
