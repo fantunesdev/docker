@@ -2,6 +2,7 @@ services:
   app-myfin:
     volumes:
       - ./myfinance/statement/static:/myfinance/static
+      - ./myfinance/statement/migrations:/myfinance/migrations
       - ./myfinance/media/:/myfinance/media/
       - ./myfinance/logs/:/myfinance/logs/
     build:
