@@ -1,5 +1,6 @@
 services:
   app-myfin:
+    container_name: app-myfin
     volumes:
       - ./myfinance/statement/static:/myfinance/static
       - ./myfinance/statement/migrations:/myfinance/migrations
@@ -39,6 +40,7 @@ services:
       "
 
   mysql-myfin:
+    container_name: mysql-myfin
     image: mysql:latest
     environment:
       MYSQL_ROOT_PASSWORD: "${MYFIN_MYSQL_ROOT_PASSWORD}"
@@ -54,6 +56,7 @@ services:
         ipv4_address: 172.18.0.2
 
   nginx-myfin:
+    container_name: nginx-myfin
     image: nginx:1.19.0-alpine
     volumes:
       - ./myfinance/statement/static/:/static/
@@ -67,6 +70,7 @@ services:
       - myfin-net
 
   redis-myfin:
+    container_name: redis-myfin
     image: redis:alpine
     restart: always
     ports:
@@ -76,9 +80,9 @@ services:
         ipv4_address: 172.18.0.4
 
   transaction-classifier:
+    container_name: transaction-classifier
     build:
       context: ./transaction_classifier
-    container_name: transaction-classifier
     ports:
       - "8112:8112"
     environment:
