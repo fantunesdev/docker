@@ -31,3 +31,4 @@ RUN poetry config virtualenvs.create false \
 COPY myfinance /myfinance
 
 CMD ["sh"]
+
