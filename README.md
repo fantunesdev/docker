@@ -1,5 +1,35 @@
 # Docker MyFinance
 
+## HTTPS na VM da rede local
+
+O ambiente existente usa o Nginx do projeto `reverse_proxy` para terminar o TLS,
+com acesso por `https://myfinance.com` e `https://192.168.100.10`.
+O guia de certificados, instalação no Pop!_OS/Android, implantação no Alpine e
+renovação está em [`../reverse_proxy/README.md`](../reverse_proxy/README.md).
+Atualize também o código do MyFinance antes de habilitar as opções abaixo.
+
+Crie a rede compartilhada antes de iniciar o Compose existente:
+
+```bash
+docker network inspect myfinance-proxy >/dev/null 2>&1 || docker network create myfinance-proxy
+```
+
+Para ativar o reconhecimento de HTTPS e os cookies seguros, acrescente ao `.env`:
+
+```dotenv
+MYFIN_TRUST_HTTPS_PROXY=true
+MYFIN_SESSION_COOKIE_SECURE=true
+MYFIN_CSRF_COOKIE_SECURE=true
+```
+
+Essas opções têm padrão `false`, preservando HTTP enquanto o HTTPS não estiver
+instalado. Mantenha hosts e origens existentes, incluindo os dois endereços HTTPS.
+O debug não é alterado por esta configuração. O proxy externo deve sobrescrever
+`X-Forwarded-Proto`; o Nginx interno preserva esse protocolo até o Django.
+A porta 81 agora é publicada somente em `127.0.0.1` da VM; o proxy externo acessa
+`nginx-myfin:80` pela rede `myfinance-proxy`. O Compose de desenvolvimento
+continua independente e não usa essa rede nem os certificados.
+
 ## Desenvolvimento com recarga automática
 
 O ambiente de desenvolvimento usa `docker-compose.dev.yml` de forma independente.
