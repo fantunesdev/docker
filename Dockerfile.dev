@@ -1,0 +1,25 @@
+FROM python:3.13-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    POETRY_VIRTUALENVS_CREATE=false
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential pkg-config default-libmysqlclient-dev libpq-dev libffi-dev libmagic1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Poetry separado das dependências dos projetos.
+RUN python -m venv /opt/poetry \
+    && /opt/poetry/bin/pip install --no-cache-dir poetry==1.8.2 \
+    && python -m venv /opt/venv
+
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /app
+COPY pyproject.toml poetry.lock ./
+RUN /opt/poetry/bin/poetry install --no-root --no-interaction --no-ansi
+
+# O código é montado pelo Compose; a imagem contém apenas as dependências.
+CMD ["sh"]

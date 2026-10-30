@@ -1,3 +1,5 @@
 .env
+.env.dev
+__pycache__/
 myfinance/*
 transaction_classifier/*

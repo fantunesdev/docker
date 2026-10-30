@@ -1,0 +1,116 @@
+# Arquivo independente: não combinar com docker-compose.yml.
+name: myfinance-dev
+
+services:
+  app-myfin:
+    build:
+      context: ${MYFINANCE_PATH:-../myfinance}
+      dockerfile: ${DEV_DOCKERFILE:-../docker/Dockerfile.dev}
+      network: ${DEV_BUILD_NETWORK:-default}
+    init: true
+    user: "${DEV_UID:-1000}:${DEV_GID:-1000}"
+    working_dir: /myfinance
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+    ports:
+      - "127.0.0.1:${MYFIN_DEV_PORT:-8000}:8000"
+    environment:
+      DJANGO_SETTINGS_MODULE: dev_settings
+      PYTHONPATH: /opt/myfinance-dev:/myfinance
+      DEBUG: "1"
+      ENVIRONMENT: development
+      SECRET_KEY: ${DEV_SECRET_KEY:-myfinance-development-only-secret-key-change-for-other-environments}
+      HOSTS: localhost,127.0.0.1,app-myfin
+      CORS_ALLOWED_ORIGINS: http://localhost:${MYFIN_DEV_PORT:-8000},http://127.0.0.1:${MYFIN_DEV_PORT:-8000}
+      CSRF_TRUSTED_ORIGINS: http://localhost:${MYFIN_DEV_PORT:-8000},http://127.0.0.1:${MYFIN_DEV_PORT:-8000}
+      MYSQL_HOST: mysql-myfin
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: myfinance_dev
+      MYSQL_USER: myfinance_dev
+      MYSQL_PASSWORD: ${DEV_MYSQL_PASSWORD:-myfinance-dev}
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: "60"
+      TRANSACTION_CLASSIFIER_URL: http://transaction-classifier
+      TRANSACTION_CLASSIFIER_PORT: "8112"
+    volumes:
+      - type: bind
+        source: ${MYFINANCE_PATH:-../myfinance}
+        target: /myfinance
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./dev
+        target: /opt/myfinance-dev
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      mysql-myfin:
+        condition: service_healthy
+      redis-myfin:
+        condition: service_healthy
+
+  mysql-myfin:
+    image: mysql:8.4
+    ports:
+      - "127.0.0.1:3306:3306"
+    environment:
+      MYSQL_DATABASE: myfinance_dev
+      MYSQL_USER: myfinance_dev
+      MYSQL_PASSWORD: ${DEV_MYSQL_PASSWORD:-myfinance-dev}
+      MYSQL_ROOT_PASSWORD: ${DEV_MYSQL_ROOT_PASSWORD:-myfinance-dev-root}
+    volumes:
+      - mysql-dev-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_PASSWORD\" mysql -h 127.0.0.1 -u \"$$MYSQL_USER\" \"$$MYSQL_DATABASE\" -e 'SELECT 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  redis-myfin:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-dev-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  transaction-classifier:
+    profiles: ["classifier"]
+    build:
+      context: ${CLASSIFIER_PATH:-../transaction_classifier}
+      dockerfile: ${DEV_DOCKERFILE:-../docker/Dockerfile.dev}
+      network: ${DEV_BUILD_NETWORK:-default}
+    init: true
+    user: "${DEV_UID:-1000}:${DEV_GID:-1000}"
+    working_dir: /app
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8112", "--reload", "--reload-dir", "/app/api", "--reload-dir", "/app/training", "--reload-dir", "/app/schemas"]
+    ports:
+      - "127.0.0.1:${CLASSIFIER_DEV_PORT:-8112}:8112"
+    environment:
+      SERVER_URL: http://app-myfin:8000
+      OAUTH2_TOKEN_URL: http://app-myfin:8000/o/token/
+      REDIS_HOST: redis-myfin
+      REDIS_PORT: "6379"
+      REDIS_DB: "2"
+      REDIS_KEY: classifier-dev-oauth-token
+      CLIENT_ID: ${DEV_CLASSIFIER_CLIENT_ID:-}
+      CLIENT_SECRET: ${DEV_CLASSIFIER_CLIENT_SECRET:-}
+    volumes:
+      - type: bind
+        source: ${CLASSIFIER_PATH:-../transaction_classifier}
+        target: /app
+        bind:
+          create_host_path: false
+    depends_on:
+      app-myfin:
+        condition: service_started
+      redis-myfin:
+        condition: service_healthy
+
+volumes:
+  mysql-dev-data:
+  redis-dev-data:
