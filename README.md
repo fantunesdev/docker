@@ -11,7 +11,7 @@ Atualize também o código do MyFinance antes de habilitar as opções abaixo.
 Crie a rede compartilhada antes de iniciar o Compose existente:
 
 ```bash
-docker network inspect myfinance-proxy >/dev/null 2>&1 || docker network create myfinance-proxy
+docker network inspect myfinance-proxy >/dev/null 2>&1 || docker network create --subnet 172.30.0.0/24 myfinance-proxy
 ```
 
 Para ativar o reconhecimento de HTTPS e os cookies seguros, acrescente ao `.env`:

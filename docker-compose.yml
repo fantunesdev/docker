@@ -30,6 +30,7 @@ services:
       TRANSACTION_CLASSIFIER_PORT: "${MYFIN_TRANSACTION_CLASSIFIER_PORT}"
     depends_on:
       - mysql-myfin
+      - redis-myfin
     networks:
       myfin-net:
         ipv4_address: 172.18.0.3
