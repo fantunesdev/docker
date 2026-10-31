@@ -1,34 +1,44 @@
-#!/bin/bash
+#!/bin/sh
 
-set -Eeuo pipefail
+set -eu
 
 BASEDIR="${BASEDIR:-/docker/myfinance}"
 BKP_IMAGE="docker_myfinance_app-myfin-bkp:$(date +'%Y%m%d-%H%M%S')"
 TEST_CONTAINER="myfinance-update-test-$$"
 TEST_TIMEOUT="${TEST_TIMEOUT:-60}"
 
-[[ "$TEST_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || {
-    echo 'TEST_TIMEOUT deve ser um número inteiro positivo.' >&2
-    exit 1
-}
+case "$TEST_TIMEOUT" in
+    ''|0*|*[!0-9]*)
+        echo 'TEST_TIMEOUT deve ser um número inteiro positivo.' >&2
+        exit 1
+        ;;
+esac
 
 cd "$BASEDIR"
 if docker compose version >/dev/null 2>&1; then
-    COMPOSE=(docker compose -f "$BASEDIR/docker-compose.yml")
+    COMPOSE_V2=true
 else
-    COMPOSE=(docker-compose -f "$BASEDIR/docker-compose.yml")
+    COMPOSE_V2=false
 fi
+
+compose() {
+    if [ "$COMPOSE_V2" = true ]; then
+        docker compose -f "$BASEDIR/docker-compose.yml" "$@"
+    else
+        docker-compose -f "$BASEDIR/docker-compose.yml" "$@"
+    fi
+}
 
 cleanup() {
     docker rm -f "$TEST_CONTAINER" >/dev/null 2>&1 || true
 }
-trap cleanup EXIT
+trap cleanup 0
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
 # Exige o serviço atual ativo: o teste usa sua rede, banco e Redis.
-CURRENT_CONTAINER=$("${COMPOSE[@]}" ps -q app-myfin)
-if [[ -z "$CURRENT_CONTAINER" ]]; then
+CURRENT_CONTAINER=$(compose ps -q app-myfin)
+if [ -z "$CURRENT_CONTAINER" ]; then
     echo 'O serviço app-myfin precisa estar em execução para validar a atualização.' >&2
     exit 1
 fi
@@ -37,18 +47,18 @@ docker tag "$ACTUAL_IMAGE" "$BKP_IMAGE"
 echo "Backup da imagem atual: $BKP_IMAGE"
 
 git -C myfinance pull --ff-only
-"${COMPOSE[@]}" build --no-cache app-myfin
+compose build --no-cache app-myfin
 
 # Não publica portas nem inicia dependências. Evita collectstatic, que alteraria
 # os arquivos estáticos compartilhados com a aplicação que ainda está no ar.
-"${COMPOSE[@]}" run -d --no-deps --name "$TEST_CONTAINER" app-myfin \
+compose run -d --no-deps --name "$TEST_CONTAINER" app-myfin \
     sh -c 'python manage.py check && exec daphne -b 0.0.0.0 -p 8000 myfinance.asgi:application'
 
 echo "Validando a nova imagem por até ${TEST_TIMEOUT}s..."
-DEADLINE=$((SECONDS + TEST_TIMEOUT))
+DEADLINE=$(($(date +%s) + TEST_TIMEOUT))
 READY=false
-while (( SECONDS < DEADLINE )); do
-    if [[ "$(docker inspect --format '{{.State.Running}}' "$TEST_CONTAINER")" != true ]]; then
+while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+    if [ "$(docker inspect --format '{{.State.Running}}' "$TEST_CONTAINER")" != true ]; then
         break
     fi
     if docker exec -i "$TEST_CONTAINER" python - <<'PY'
@@ -80,7 +90,7 @@ PY
     sleep 2
 done
 
-if [[ "$READY" != true ]]; then
+if [ "$READY" != true ]; then
     echo 'Validação falhou. Os containers atuais continuam em execução.' >&2
     docker logs "$TEST_CONTAINER" >&2 || true
     exit 1
@@ -90,5 +100,5 @@ fi
 docker rm -f "$TEST_CONTAINER"
 echo 'Imagem validada. Reiniciando o serviço...'
 sudo rc-service myfinance stop
-"${COMPOSE[@]}" down
+compose down
 sudo rc-service myfinance start
