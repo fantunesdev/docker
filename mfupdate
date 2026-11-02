@@ -6,6 +6,7 @@ BASEDIR="${BASEDIR:-/docker/myfinance}"
 BKP_IMAGE="docker_myfinance_app-myfin-bkp:$(date +'%Y%m%d-%H%M%S')"
 TEST_CONTAINER="myfinance-update-test-$$"
 TEST_TIMEOUT="${TEST_TIMEOUT:-60}"
+TEST_OVERRIDE=''
 
 case "$TEST_TIMEOUT" in
     ''|0*|*[!0-9]*)
@@ -31,6 +32,9 @@ compose() {
 
 cleanup() {
     docker rm -f "$TEST_CONTAINER" >/dev/null 2>&1 || true
+    if [ -n "$TEST_OVERRIDE" ]; then
+        rm -f "$TEST_OVERRIDE"
+    fi
 }
 trap cleanup 0
 trap 'exit 130' INT
@@ -49,9 +53,19 @@ echo "Backup da imagem atual: $BKP_IMAGE"
 git -C myfinance pull --ff-only
 compose build --no-cache app-myfin
 
+# O container temporário compartilha a rede, mas não o IP fixo da aplicação.
+TEST_OVERRIDE=$(mktemp "${TMPDIR:-/tmp}/mfupdate-compose.XXXXXX")
+cat > "$TEST_OVERRIDE" <<'YAML'
+services:
+  app-myfin:
+    networks:
+      myfin-net:
+        ipv4_address: ""
+YAML
+
 # Não publica portas nem inicia dependências. Evita collectstatic, que alteraria
 # os arquivos estáticos compartilhados com a aplicação que ainda está no ar.
-compose run -d --no-deps --name "$TEST_CONTAINER" app-myfin \
+compose -f "$TEST_OVERRIDE" run -d --no-deps --name "$TEST_CONTAINER" app-myfin \
     sh -c 'python manage.py check && exec daphne -b 0.0.0.0 -p 8000 myfinance.asgi:application'
 
 echo "Validando a nova imagem por até ${TEST_TIMEOUT}s..."
