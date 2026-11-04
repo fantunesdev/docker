@@ -6,11 +6,19 @@ BASEDIR="${BASEDIR:-/docker/myfinance}"
 BKP_IMAGE="docker_myfinance_app-myfin-bkp:$(date +'%Y%m%d-%H%M%S')"
 TEST_CONTAINER="myfinance-update-test-$$"
 TEST_TIMEOUT="${TEST_TIMEOUT:-60}"
+BACKUP_KEEP="${BACKUP_KEEP:-3}"
 TEST_OVERRIDE=''
 
 case "$TEST_TIMEOUT" in
     ''|0*|*[!0-9]*)
         echo 'TEST_TIMEOUT deve ser um número inteiro positivo.' >&2
+        exit 1
+        ;;
+esac
+
+case "$BACKUP_KEEP" in
+    ''|0*|*[!0-9]*)
+        echo 'BACKUP_KEEP deve ser um número inteiro positivo.' >&2
         exit 1
         ;;
 esac
@@ -28,6 +36,38 @@ compose() {
     else
         docker-compose -f "$BASEDIR/docker-compose.yml" "$@"
     fi
+}
+
+clean_docker_images() {
+    echo "Limpando Docker; mantendo o backup atual e até $BACKUP_KEEP backups no total..."
+
+    # Os nomes têm data/hora ordenável. Sempre preserva o backup desta execução,
+    # mesmo se o relógio da VM tiver mudado desde o último deploy.
+    if BACKUP_TAGS=$(docker image ls \
+        --filter 'reference=docker_myfinance_app-myfin-bkp:*' \
+        --format '{{.Repository}}:{{.Tag}}'); then
+        BACKUP_TAGS=$(printf '%s\n' "$BACKUP_TAGS" | LC_ALL=C sort -ru)
+        KEPT_BACKUPS=1
+        for BACKUP_TAG in $BACKUP_TAGS; do
+            [ "$BACKUP_TAG" = "$BKP_IMAGE" ] && continue
+            if [ "$KEPT_BACKUPS" -lt "$BACKUP_KEEP" ]; then
+                KEPT_BACKUPS=$((KEPT_BACKUPS + 1))
+                continue
+            fi
+            # Sem --force: referências em uso não devem ser forçadas à remoção.
+            docker image rm "$BACKUP_TAG" || \
+                echo "Aviso: não foi possível remover $BACKUP_TAG." >&2
+        done
+    else
+        echo 'Aviso: não foi possível listar os backups antigos.' >&2
+    fi
+
+    # Não usa image prune -a, system prune ou volume prune: mantém imagens com
+    # tag de outros serviços e todos os volumes, inclusive o banco de dados.
+    docker builder prune -a -f || \
+        echo 'Aviso: não foi possível limpar o cache de build.' >&2
+    docker image prune -f || \
+        echo 'Aviso: não foi possível limpar as imagens sem tag.' >&2
 }
 
 cleanup() {
@@ -49,6 +89,9 @@ fi
 ACTUAL_IMAGE=$(docker inspect --format '{{.Image}}' "$CURRENT_CONTAINER")
 docker tag "$ACTUAL_IMAGE" "$BKP_IMAGE"
 echo "Backup da imagem atual: $BKP_IMAGE"
+
+# Libera espaço antes de criar as novas camadas da imagem.
+clean_docker_images
 
 git -C myfinance pull --ff-only
 compose build --no-cache app-myfin
@@ -116,3 +159,6 @@ echo 'Imagem validada. Reiniciando o serviço...'
 sudo rc-service myfinance stop
 compose down
 sudo rc-service myfinance start
+
+# Remove também o cache gerado pelo build desta atualização.
+clean_docker_images
