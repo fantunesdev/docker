@@ -30,6 +30,50 @@ A porta 81 agora é publicada somente em `127.0.0.1` da VM; o proxy externo aces
 `nginx-myfin:80` pela rede `myfinance-proxy`. O Compose de desenvolvimento
 continua independente e não usa essa rede nem os certificados.
 
+## Segurança de rede e build (S12/S13)
+
+No Compose principal, MySQL (`127.0.0.1:3306`) e Transaction Classifier
+(`127.0.0.1:8112`) ficam acessíveis somente pelo loopback do host. Para acesso
+administrativo remoto, use um túnel SSH. O Redis não publica porta no host.
+Entre containers, os endereços continuam `mysql-myfin:3306`, `redis-myfin:6379`
+e `transaction-classifier:8112`; a comunicação interna não depende de portas
+publicadas. Essas alterações passam a valer após a recriação dos serviços.
+
+O `.dockerignore` principal usa uma lista de código permitido e exclui arquivos
+`.env*`, credenciais, mídia, logs, bancos, exportações e artefatos de treinamento.
+O build do classificador usa o `.dockerignore` do próprio repositório
+`transaction_classifier`; atualize também esse checkout antes de reconstruir.
+O `Dockerfile.dev.dockerignore` permanece exclusivo do build de desenvolvimento.
+
+Variáveis de ambiente precisam ser fornecidas em runtime pelo Compose. Arquivos
+`.env` dentro do código não são copiados para a imagem. Para Pluggy, preencha no
+`.env` usado pelo Compose (ou no ambiente do processo Compose):
+
+```dotenv
+PLUGGY_CLIENT_ID=
+PLUGGY_CLIENT_SECRET=
+PLUGGY_ITEM_ID=
+```
+
+O arquivo de ambiente do Compose não entra na imagem; essas três variáveis são
+encaminhadas explicitamente ao Django. Os demais parâmetros continuam usando os
+mapeamentos existentes em `environment`. Não grave credenciais no Dockerfile.
+
+Mídia, logs, dados MySQL e modelos existentes continuam nos volumes/bind mounts.
+Excluir dados do build não os remove do disco nem substitui backup. Modelos e a
+fila SQLite do TC continuam no diretório persistido `training/model`.
+
+Para conferir a sintaxe sem exibir valores de ambiente, execute:
+
+```bash
+docker compose -f docker-compose.yml config --quiet
+```
+
+Uma imagem antiga já distribuída pode conter arquivos copiados anteriormente;
+reconstruir não apaga camadas antigas. Se houver confirmação de credencial
+incluída numa imagem antiga, remova a imagem dos destinos correspondentes e
+rotacione essa credencial.
+
 ## Desenvolvimento com recarga automática
 
 O ambiente de desenvolvimento usa `docker-compose.dev.yml` de forma independente.

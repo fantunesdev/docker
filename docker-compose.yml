@@ -28,6 +28,9 @@ services:
       ALGORITHM: "${MYFIN_DJANGO_ALGORITHM}"
       TRANSACTION_CLASSIFIER_URL: "${MYFIN_TRANSACTION_CLASSIFIER_URL}"
       TRANSACTION_CLASSIFIER_PORT: "${MYFIN_TRANSACTION_CLASSIFIER_PORT}"
+      PLUGGY_CLIENT_ID: "${PLUGGY_CLIENT_ID:-}"
+      PLUGGY_CLIENT_SECRET: "${PLUGGY_CLIENT_SECRET:-}"
+      PLUGGY_ITEM_ID: "${PLUGGY_ITEM_ID:-}"
     depends_on:
       - mysql-myfin
       - redis-myfin
@@ -50,7 +53,7 @@ services:
       MYSQL_PASSWORD: "${MYFIN_MYSQL_PASSWORD}"
       MYSQL_DATABASE: "${MYFIN_MYSQL_DATABASE}"
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     volumes:
       - mysql-myfin-vol:/var/lib/mysql
     networks:
@@ -76,8 +79,6 @@ services:
     container_name: redis-myfin
     image: redis:alpine
     restart: always
-    ports:
-      - "6379:6379"
     networks:
       myfin-net:
         ipv4_address: 172.18.0.4
@@ -87,7 +88,7 @@ services:
     build:
       context: ./transaction_classifier
     ports:
-      - "8112:8112"
+      - "127.0.0.1:8112:8112"
     environment:
       SECRET_KEY: "${MYFIN_SECRET_KEY}"
       ALGORITHM: "${TRANSACTION_CLASSIFIER_ALGORITHM}"
