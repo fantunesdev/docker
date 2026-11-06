@@ -2,7 +2,7 @@ services:
   app-myfin:
     container_name: app-myfin
     volumes:
-      - ./myfinance/statement/static:/myfinance/static
+      - ./static:/myfinance/static
       - ./myfinance/statement/migrations:/myfinance/migrations
       - ./myfinance/media/:/myfinance/media/
       - ./myfinance/logs/:/myfinance/logs/
@@ -64,7 +64,7 @@ services:
     container_name: nginx-myfin
     image: nginx:1.19.0-alpine
     volumes:
-      - ./myfinance/statement/static/:/static/
+      - ./static/:/static/
       - ./myfinance/media/:/media/
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
     ports:

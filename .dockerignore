@@ -76,3 +76,6 @@
 **/*.p12
 myfinance/myfinance/test_settings.py
 myfinance/myfinance/security_test_settings.py
+myfinance/statement/static/bank_sync
+myfinance/statement/static/django_extensions
+myfinance/statement/static/investments

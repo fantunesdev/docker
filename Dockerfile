@@ -25,7 +25,7 @@ WORKDIR /myfinance
 COPY myfinance/pyproject.toml myfinance/poetry.lock* /myfinance/
 
 RUN poetry config virtualenvs.create false \
-  && poetry install --no-ansi --no-root
+  && poetry install --only main --no-ansi --no-root
 
 # Agora copia o restante do código
 COPY myfinance /myfinance
