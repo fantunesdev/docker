@@ -111,6 +111,7 @@ YAML
 compose -f "$TEST_OVERRIDE" run -d --no-deps --name "$TEST_CONTAINER" app-myfin \
     sh -c 'python manage.py check && exec daphne -b 0.0.0.0 -p 8000 myfinance.asgi:application'
 
+VALIDATED_IMAGE=$(docker inspect --format '{{.Image}}' "$TEST_CONTAINER")
 echo "Validando a nova imagem por até ${TEST_TIMEOUT}s..."
 DEADLINE=$(($(date +%s) + TEST_TIMEOUT))
 READY=false
@@ -134,11 +135,17 @@ with connection.cursor() as cursor:
 
 host = next((h.lstrip('.') for h in settings.ALLOWED_HOSTS if h != '*'), 'localhost')
 client = http.client.HTTPConnection('127.0.0.1', 8000, timeout=2)
-client.request('GET', '/', headers={'Host': host})
-response = client.getresponse()
-if not 200 <= response.status < 400:
-    raise RuntimeError(f'HTTP {response.status} ao acessar /')
-client.close()
+try:
+    client.request('GET', '/', headers={'Host': host})
+    response = client.getresponse()
+    if not 200 <= response.status < 400:
+        print(f'Aplicação ainda não está pronta: HTTP {response.status}.', flush=True)
+        raise SystemExit(1)
+except OSError:
+    print('Aguardando a aplicação iniciar e aceitar conexões...', flush=True)
+    raise SystemExit(1)
+finally:
+    client.close()
 PY
     then
         READY=true
@@ -159,6 +166,18 @@ echo 'Imagem validada. Reiniciando o serviço...'
 sudo rc-service myfinance stop
 compose down
 sudo rc-service myfinance start
+
+ACTIVE_CONTAINER=$(compose ps -q app-myfin)
+if [ -z "$ACTIVE_CONTAINER" ]; then
+    echo 'Falha: o aplicativo não está em execução após o reinício.' >&2
+    exit 1
+fi
+ACTIVE_IMAGE=$(docker inspect --format '{{.Image}}' "$ACTIVE_CONTAINER")
+if [ "$ACTIVE_IMAGE" != "$VALIDATED_IMAGE" ]; then
+    echo "Falha: a imagem ativa ($ACTIVE_IMAGE) difere da imagem validada ($VALIDATED_IMAGE)." >&2
+    exit 1
+fi
+echo "Atualização concluída. Imagem ativa: $ACTIVE_IMAGE"
 
 # Remove também o cache gerado pelo build desta atualização.
 clean_docker_images
