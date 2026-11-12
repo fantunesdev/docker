@@ -237,3 +237,21 @@ Para inicializar automaticamente a aplicação com o sistema, copie o arquivo my
 ### Acessando o MySQL
 
 > mysql -u USUARIO -h 127.0.0.1 -P 3307 -p
+
+
+## Repositórios e trabalhador de investimentos em produção
+
+`myfinance/` e `transaction_classifier/` são clones independentes, não submódulos.
+Atualize cada repositório com seu próprio Git. O repositório de infraestrutura
+não fixa seus commits nem rastreia seus arquivos. Ao preparar um servidor novo,
+clone ambos nos diretórios indicados antes de construir as imagens.
+
+O serviço `investment-history` processa a fila persistida de movimentações da
+Pluggy. Ele compartilha a imagem e as variáveis da aplicação e participa do ciclo
+normal de parada e inicialização do Compose e do `mfupdate`. Não crie um
+trabalhador avulso na rede do Compose.
+
+Mantenha os backups de arquivos em `/docker/myfinance-backups`, fora do checkout
+`/docker/myfinance`. Os backups de imagens continuam sendo gerenciados pelo
+`mfupdate`. As cópias antigas de estáticos gerados foram preservadas no mesmo
+diretório de backups; os arquivos servidos pelo Nginx ficam em `static/`.

@@ -1,6 +1,7 @@
 services:
   app-myfin:
     container_name: app-myfin
+    image: myfinance-app-myfin
     volumes:
       - ./static:/myfinance/static
       - ./myfinance/statement/migrations:/myfinance/migrations
@@ -8,7 +9,7 @@ services:
       - ./myfinance/logs/:/myfinance/logs/
     build:
       context: .
-    environment:
+    environment: &myfinance-environment
       DEBUG: "${MYFIN_DEBUG}"
       DJANGO: "${MYFIN_DEBUG}"
       SECRET_KEY: "${MYFIN_SECRET_KEY}"
@@ -43,6 +44,20 @@ services:
         python manage.py collectstatic --no-input --verbosity 0 &&
         daphne -b 0.0.0.0 -p 8000 myfinance.asgi:application
       "
+
+  investment-history:
+    container_name: myfinance-investment-history
+    image: myfinance-app-myfin
+    restart: unless-stopped
+    command: ["python", "manage.py", "process_investment_history"]
+    environment: *myfinance-environment
+    volumes:
+      - ./myfinance:/myfinance:ro
+      - ./myfinance/logs/:/myfinance/logs/
+    depends_on:
+      - app-myfin
+    networks:
+      - myfin-net
 
   mysql-myfin:
     container_name: mysql-myfin

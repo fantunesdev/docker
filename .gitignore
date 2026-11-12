@@ -1,7 +1,10 @@
 .env
 .env.dev
 __pycache__/
-myfinance/*
-transaction_classifier/*
+/myfinance/
+/transaction_classifier/
 .env.pluggy
 static/
+
+# Backups de runtime não pertencem ao código da infraestrutura.
+/backups/
