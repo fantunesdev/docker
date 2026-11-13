@@ -1,6 +1,7 @@
 services:
   app-myfin:
     container_name: app-myfin
+    restart: unless-stopped
     image: myfinance-app-myfin
     volumes:
       - ./static:/myfinance/static
@@ -57,10 +58,12 @@ services:
     depends_on:
       - app-myfin
     networks:
-      - myfin-net
+      myfin-net:
+        ipv4_address: 172.18.0.7
 
   mysql-myfin:
     container_name: mysql-myfin
+    restart: unless-stopped
     image: mysql:latest
     environment:
       MYSQL_ROOT_PASSWORD: "${MYFIN_MYSQL_ROOT_PASSWORD}"
@@ -77,6 +80,7 @@ services:
 
   nginx-myfin:
     container_name: nginx-myfin
+    restart: unless-stopped
     image: nginx:1.19.0-alpine
     volumes:
       - ./static/:/static/
@@ -87,8 +91,9 @@ services:
     depends_on:
       - app-myfin
     networks:
-      - myfin-net
-      - https-proxy
+      myfin-net:
+        ipv4_address: 172.18.0.5
+      https-proxy: {}
 
   redis-myfin:
     container_name: redis-myfin

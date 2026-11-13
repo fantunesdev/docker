@@ -162,8 +162,9 @@ fi
 
 # Só derruba a aplicação atual depois de validar e remover o container de teste.
 docker rm -f "$TEST_CONTAINER"
-echo 'Imagem validada. Reiniciando o serviço...'
-sudo rc-service myfinance stop
+echo 'Imagem validada. Instalando o serviço OpenRC e reiniciando...'
+sudo install -m 0755 "$BASEDIR/myfinance.init.d" /etc/init.d/myfinance
+sudo rc-service --ifstarted myfinance stop
 compose down
 sudo rc-service myfinance start
 

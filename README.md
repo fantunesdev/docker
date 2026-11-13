@@ -255,3 +255,23 @@ Mantenha os backups de arquivos em `/docker/myfinance-backups`, fora do checkout
 `/docker/myfinance`. Os backups de imagens continuam sendo gerenciados pelo
 `mfupdate`. As cópias antigas de estáticos gerados foram preservadas no mesmo
 diretório de backups; os arquivos servidos pelo Nginx ficam em `static/`.
+
+
+## Inicialização no Alpine Linux
+
+O script `myfinance.init.d` declara a dependência do Docker e preserva as redes
+existentes durante o boot. Contêineres com reinício automático podem já estar
+usando essas redes quando o OpenRC inicia o serviço.
+
+Os serviços da rede interna usam IPs fixos distintos, incluindo o Nginx
+(`172.18.0.5`) e o trabalhador de investimentos (`172.18.0.7`), para evitar que um
+contêiner com IP automático ocupe o endereço de um serviço ainda parado. Banco,
+aplicação e Nginx também usam `restart: unless-stopped`.
+
+Após publicar este repositório, atualize o checkout de infraestrutura no servidor
+com `git -C /docker/myfinance pull --ff-only` e execute o `mfupdate` habitual.
+O `mfupdate` atualiza o checkout da aplicação, mas não o da infraestrutura.
+Depois de validar a imagem e antes de reiniciar os serviços, ele instala a versão rastreada de
+`myfinance.init.d` em `/etc/init.d/myfinance`. O fluxo também funciona se o OpenRC
+considerar o serviço parado após uma recuperação manual pelo Compose. Não é
+necessário editar a configuração diretamente no servidor.

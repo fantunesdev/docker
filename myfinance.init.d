@@ -7,13 +7,13 @@ command="/usr/bin/docker-compose"
 command_args="-f /docker/myfinance/docker-compose.yml up -d"
 pidfile="/run/${RC_SVCNAME}.pid"
 
+depend() {
+    need docker
+    after networking
+}
+
 start_pre() {
     checkpath --directory --mode 0755 /docker/myfinance
-    if /usr/bin/docker network inspect myfinance_myfin-net >/dev/null 2>&1; then
-        ebegin "Removing existing Docker network"
-        /usr/bin/docker network rm myfinance_myfin-net
-        eend $?
-    fi
 }
 
 start() {
