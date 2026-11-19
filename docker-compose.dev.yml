@@ -2,7 +2,8 @@
 name: myfinance-dev
 
 services:
-  app-myfin:
+  app-myfin: &myfinance-dev-runtime
+    image: ${MYFIN_DEV_IMAGE:-myfinance-dev-app-myfin}
     build:
       context: ${MYFINANCE_PATH:-../myfinance}
       dockerfile: ${DEV_DOCKERFILE:-../docker/Dockerfile.dev}
@@ -48,6 +49,12 @@ services:
         condition: service_healthy
       redis-myfin:
         condition: service_healthy
+
+  investment-history:
+    <<: *myfinance-dev-runtime
+    command: ["python", "manage.py", "process_investment_history"]
+    ports: []
+    restart: on-failure
 
   mysql-myfin:
     image: mysql:8.4

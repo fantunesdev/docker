@@ -116,6 +116,14 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml exec app-myfin pyth
 docker compose --env-file .env.dev -f docker-compose.dev.yml exec app-myfin python manage.py createsuperuser
 ```
 
+O serviço `investment-history` sobe junto com o ambiente de desenvolvimento e
+processa a fila de investimentos com a mesma imagem, código e configuração do
+aplicativo, sem publicar portas. O botão de atualizar investimentos agenda a
+consulta e o registro das movimentações; o trabalhador processa essa consulta
+em segundo plano. Após mudar o código do trabalhador, execute
+`docker compose --env-file .env.dev -f docker-compose.dev.yml restart investment-history`.
+Se mudar dependências ou variáveis, reconstrua/recrie os serviços correspondentes.
+
 Acesse **http://localhost:8000**. A porta pode ser alterada em `MYFIN_DEV_PORT`.
 O MySQL está disponível no computador em `127.0.0.1:3306`, com banco e usuário
 `myfinance_dev` e senha definida em `DEV_MYSQL_PASSWORD` no `.env.dev`.
