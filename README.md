@@ -291,3 +291,14 @@ Depois de validar a imagem e antes de reiniciar os serviços, ele instala a vers
 `myfinance.init.d` em `/etc/init.d/myfinance`. O fluxo também funciona se o OpenRC
 considerar o serviço parado após uma recuperação manual pelo Compose. Não é
 necessário editar a configuração diretamente no servidor.
+
+## Migrações na atualização
+
+O `mfupdate` verifica as migrações da imagem validada antes de substituir o app.
+Se houver migrações pendentes, salva um dump MySQL privado fora do repositório,
+em `/docker/myfinance-backups` por padrão, executa `migrate --noinput` e verifica
+novamente. `MIGRATION_BACKUP_DIR` permite escolher outro diretório de backup.
+Uma falha de backup ou migração interrompe a implantação antes da parada do app.
+O backup permanece disponível para recuperação; o script não restaura o banco
+automaticamente. Atualize este repositório de infraestrutura via Git para que
+essa etapa passe a fazer parte do comando instalado.

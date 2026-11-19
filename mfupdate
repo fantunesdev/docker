@@ -8,6 +8,7 @@ TEST_CONTAINER="myfinance-update-test-$$"
 TEST_TIMEOUT="${TEST_TIMEOUT:-60}"
 BACKUP_KEEP="${BACKUP_KEEP:-3}"
 TEST_OVERRIDE=''
+MIGRATION_BACKUP_TEMP=''
 
 case "$TEST_TIMEOUT" in
     ''|0*|*[!0-9]*)
@@ -71,6 +72,9 @@ clean_docker_images() {
 }
 
 cleanup() {
+    if [ -n "$MIGRATION_BACKUP_TEMP" ]; then
+        rm -f "$MIGRATION_BACKUP_TEMP"
+    fi
     docker rm -f "$TEST_CONTAINER" >/dev/null 2>&1 || true
     if [ -n "$TEST_OVERRIDE" ]; then
         rm -f "$TEST_OVERRIDE"
@@ -161,6 +165,24 @@ if [ "$READY" != true ]; then
     echo 'O banco pode ter recebido migrations; o backup da imagem não restaura o banco.' >&2
     docker logs "$TEST_CONTAINER" >&2 || true
     exit 1
+fi
+
+# O check HTTP valida a imagem, mas não garante que as tabelas dos models existem.
+# Executa as migrations da imagem validada antes de substituir a aplicação atual.
+if docker exec "$TEST_CONTAINER" python manage.py migrate --check >/dev/null 2>&1; then
+    echo 'Banco de dados já está com as migrações aplicadas.'
+else
+    MIGRATION_BACKUP_DIR="${MIGRATION_BACKUP_DIR:-$(dirname "$BASEDIR")/myfinance-backups}"
+    mkdir -p -m 700 "$MIGRATION_BACKUP_DIR"
+    MIGRATION_BACKUP_TEMP=$(mktemp "$MIGRATION_BACKUP_DIR/.before-migrations.XXXXXX")
+    compose exec -T mysql-myfin sh -c 'export MYSQL_PWD="$MYSQL_PASSWORD"; exec mysqldump --single-transaction --no-tablespaces --set-gtid-purged=OFF -u "$MYSQL_USER" "$MYSQL_DATABASE"' > "$MIGRATION_BACKUP_TEMP"
+    test -s "$MIGRATION_BACKUP_TEMP"
+    MIGRATION_BACKUP_FILE="$MIGRATION_BACKUP_DIR/myfinance-before-migrations-$(date +%Y%m%d-%H%M%S)-$$.sql"
+    mv "$MIGRATION_BACKUP_TEMP" "$MIGRATION_BACKUP_FILE"
+    MIGRATION_BACKUP_TEMP=''
+    echo "Backup do banco antes das migrações: $MIGRATION_BACKUP_FILE"
+    docker exec "$TEST_CONTAINER" python manage.py migrate --noinput
+    docker exec "$TEST_CONTAINER" python manage.py migrate --check
 fi
 
 # Só derruba a aplicação atual depois de validar e remover o container de teste.
