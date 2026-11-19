@@ -108,11 +108,13 @@ YAML
 
 # Não publica portas nem inicia dependências. Evita collectstatic, que alteraria
 # os arquivos estáticos compartilhados com a aplicação que ainda está no ar.
+# Aplica as migrations da nova imagem antes do teste HTTP, que pode depender do
+# novo esquema. O banco é compartilhado: o backup de imagem não desfaz migrations.
 compose -f "$TEST_OVERRIDE" run -d --no-deps --name "$TEST_CONTAINER" app-myfin \
-    sh -c 'python manage.py check && exec daphne -b 0.0.0.0 -p 8000 myfinance.asgi:application'
+    sh -c 'python manage.py check && python manage.py migrate --noinput && exec daphne -b 0.0.0.0 -p 8000 myfinance.asgi:application'
 
 VALIDATED_IMAGE=$(docker inspect --format '{{.Image}}' "$TEST_CONTAINER")
-echo "Validando a nova imagem por até ${TEST_TIMEOUT}s..."
+echo "Aplicando migrations e validando a nova imagem por até ${TEST_TIMEOUT}s..."
 DEADLINE=$(($(date +%s) + TEST_TIMEOUT))
 READY=false
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
@@ -156,6 +158,7 @@ done
 
 if [ "$READY" != true ]; then
     echo 'Validação falhou. Os containers atuais continuam em execução.' >&2
+    echo 'O banco pode ter recebido migrations; o backup da imagem não restaura o banco.' >&2
     docker logs "$TEST_CONTAINER" >&2 || true
     exit 1
 fi

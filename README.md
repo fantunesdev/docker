@@ -279,6 +279,14 @@ aplicação e Nginx também usam `restart: unless-stopped`.
 Após publicar este repositório, atualize o checkout de infraestrutura no servidor
 com `git -C /docker/myfinance pull --ff-only` e execute o `mfupdate` habitual.
 O `mfupdate` atualiza o checkout da aplicação, mas não o da infraestrutura.
+Na nova imagem, executa `check` e `migrate --noinput` antes de iniciar o servidor
+temporário para a validação HTTP. Uma falha nessas etapas interrompe a atualização
+antes do reinício dos serviços. `TEST_TIMEOUT` (60 segundos por padrão) inclui o
+tempo das migrations e da validação; aumente-o para migrations demoradas.
+As migrations usam o banco de produção enquanto a versão anterior ainda está
+ativa e precisam ser compatíveis com ela. Faça backup do banco antes de atualizar:
+o backup de imagem do `mfupdate` não desfaz migrations, inclusive quando a
+validação falha.
 Depois de validar a imagem e antes de reiniciar os serviços, ele instala a versão rastreada de
 `myfinance.init.d` em `/etc/init.d/myfinance`. O fluxo também funciona se o OpenRC
 considerar o serviço parado após uma recuperação manual pelo Compose. Não é
