@@ -255,8 +255,8 @@ não fixa seus commits nem rastreia seus arquivos. Ao preparar um servidor novo,
 clone ambos nos diretórios indicados antes de construir as imagens.
 
 O serviço `investment-history` processa a fila persistida de movimentações da
-Pluggy. Ele compartilha a imagem e as variáveis da aplicação e participa do ciclo
-normal de parada e inicialização do Compose e do `mfupdate`. Não crie um
+Pluggy. Ele usa o código da imagem, sem montar o checkout por cima dela, e é
+recriado pelo `mfupdate` com a mesma imagem do slot ativo. Não crie um
 trabalhador avulso na rede do Compose.
 
 Mantenha os backups de arquivos em `/docker/myfinance-backups`, fora do checkout
@@ -265,40 +265,92 @@ Mantenha os backups de arquivos em `/docker/myfinance-backups`, fora do checkout
 diretório de backups; os arquivos servidos pelo Nginx ficam em `static/`.
 
 
-## Inicialização no Alpine Linux
+## Atualização blue/green e inicialização no Alpine Linux
 
-O script `myfinance.init.d` declara a dependência do Docker e preserva as redes
-existentes durante o boot. Contêineres com reinício automático podem já estar
-usando essas redes quando o OpenRC inicia o serviço.
+Execute `mfupdate` como antes, após atualizar este checkout de infraestrutura
+com `git -C /docker/myfinance pull --ff-only`. O script atualiza somente o clone
+`myfinance/`, constrói a imagem e alterna entre `app-myfin-blue` (`172.18.0.8`)
+e `app-myfin-green` (`172.18.0.9`). A aplicação atual, o MySQL e o Redis continuam
+em execução durante a preparação.
 
-Os serviços da rede interna usam IPs fixos distintos, incluindo o Nginx
-(`172.18.0.5`) e o trabalhador de investimentos (`172.18.0.7`), para evitar que um
-contêiner com IP automático ocupe o endereço de um serviço ainda parado. Banco,
-aplicação e Nginx também usam `restart: unless-stopped`.
+O fluxo faz `check`, verifica migrations, salva o backup quando necessário e
+aplica as migrations antes de gerar os estáticos exclusivos do novo slot.
+Depois sobe o novo servidor e valida o banco e uma resposta HTTP de sucesso ou
+redirecionamento. Só então testa e recarrega o Nginx. Uma segunda validação HTTP,
+pelo Nginx, exige o cabeçalho do slot novo antes de aposentar o antigo. Uma falha
+nessa troca restaura a configuração e a seleção anteriores. As migrations já
+aplicadas não são desfeitas.
 
-Após publicar este repositório, atualize o checkout de infraestrutura no servidor
-com `git -C /docker/myfinance pull --ff-only` e execute o `mfupdate` habitual.
-O `mfupdate` atualiza o checkout da aplicação, mas não o da infraestrutura.
-Na nova imagem, executa `check` e `migrate --noinput` antes de iniciar o servidor
-temporário para a validação HTTP. Uma falha nessas etapas interrompe a atualização
-antes do reinício dos serviços. `TEST_TIMEOUT` (60 segundos por padrão) inclui o
-tempo das migrations e da validação; aumente-o para migrations demoradas.
-As migrations usam o banco de produção enquanto a versão anterior ainda está
-ativa e precisam ser compatíveis com ela. Faça backup do banco antes de atualizar:
-o backup de imagem do `mfupdate` não desfaz migrations, inclusive quando a
-validação falha.
-Depois de validar a imagem e antes de reiniciar os serviços, ele instala a versão rastreada de
-`myfinance.init.d` em `/etc/init.d/myfinance`. O fluxo também funciona se o OpenRC
-considerar o serviço parado após uma recuperação manual pelo Compose. Não é
-necessário editar a configuração diretamente no servidor.
+Na **primeira adoção**, o `app-myfin` existente é substituído pelo slot blue.
+O Nginx precisa ser recriado uma vez para montar o diretório de configuração e
+os estáticos dos slots; espere uma breve interrupção nessa etapa. Nas próximas
+atualizações ele recebe apenas um reload. Se o container `nginx-proxy` estiver
+ativo, ele também recebe um reload nessa primeira adoção para resolver novamente
+o endereço de `nginx-myfin` na rede externa. O endereço interno `app-myfin:8000`
+passa a ser um alias de rede do Nginx, que escuta também na porta 8000 e encaminha
+para o slot ativo. Clientes com conexões antigas precisam reconectar após a
+retirada do container legado. As portas publicadas na VM permanecem iguais.
+
+`TEST_TIMEOUT` (60 segundos por padrão) limita cada etapa de espera HTTP direta
+e pelo proxy; as migrations são síncronas e não usam esse prazo.
+`DRAIN_TIMEOUT` (60 segundos por padrão) limita a espera pelos workers antigos
+do Nginx, que conservam requisições e WebSockets abertos durante o reload.
+Depois desse prazo, o app antigo recebe a parada do Docker, com mais 10 segundos
+de tolerância; conexões restantes podem ser encerradas. O worker de investimentos
+é recriado na imagem nova após a troca do app. Uma falha nessa finalização é
+reportada mantendo o slot novo ativo.
+
+O estado fica em `.mfdeploy/`, ignorado pelo Git: `active` indica o slot,
+`blue.yml`/`green.yml` fixam as imagens por tags exclusivas, `blue.nginx.conf`/`green.nginx.conf` guardam os upstreams por slot, `nginx/` contém a
+configuração publicada e `assets/` contém os estáticos. Preserve esse diretório
+e as imagens referenciadas para reiniciar a mesma versão após reboot. Não edite
+a seleção manualmente: ela precisa corresponder ao upstream do Nginx.
+O script recusa execuções concorrentes com `.mfdeploy/lock`. Após uma interrupção
+abrupta, confirme que não há atualização em execução antes de remover esse
+subdiretório de lock e repetir o comando.
+
+Use o wrapper **`mfcompose` em produção** para carregar o perfil e a imagem
+persistidos, por exemplo:
+
+```sh
+/docker/myfinance/mfcompose ps
+/docker/myfinance/mfcompose up -d
+/docker/myfinance/mfcompose logs --tail 100 app-myfin-blue
+```
+
+O wrapper usa `/docker/myfinance` por padrão; `BASEDIR` permite outro checkout.
+Ele detecta Compose v2 (`docker compose`) e mantém suporte ao v1 com profiles
+(1.28 ou superior). Antes da primeira atualização, seleciona o perfil `legacy`.
+Não execute `docker compose up` diretamente em produção: ele não carrega a
+seleção persistida. Ao executar `up`, o wrapper reconcilia o upstream com o slot
+salvo e recarrega o Nginx, inclusive se houve interrupção durante a troca.
+O Compose de desenvolvimento continua independente.
+
+O `mfupdate` instala o serviço `myfinance.init.d` em `/etc/init.d/myfinance`
+antes da troca do proxy. O OpenRC usa `mfcompose` para iniciar e parar o ambiente,
+preservando as redes existentes durante o boot e restaurando o slot ativo.
+O arquivo `myfinance.service` também usa o wrapper; ajuste seus caminhos e
+`BASEDIR` ao instalar em um servidor com systemd.
+
+Os estáticos novos ficam isolados dos antigos durante a preparação. O Nginx
+busca primeiro no slot ativo e depois no anterior, preservando arquivos com hash
+usados por páginas antigas. Arquivos com a mesma URL e conteúdo diferente passam
+a servir a versão nova; use nomes com hash para coexistência completa. Cada slot
+mantém seu diretório entre atualizações, sem `collectstatic --clear`, para não
+apagar referências antigas durante a transição. Media continua compartilhada.
 
 ## Migrações na atualização
 
-O `mfupdate` verifica as migrações da imagem validada antes de substituir o app.
-Se houver migrações pendentes, salva um dump MySQL privado fora do repositório,
-em `/docker/myfinance-backups` por padrão, executa `migrate --noinput` e verifica
-novamente. `MIGRATION_BACKUP_DIR` permite escolher outro diretório de backup.
-Uma falha de backup ou migração interrompe a implantação antes da parada do app.
-O backup permanece disponível para recuperação; o script não restaura o banco
-automaticamente. Atualize este repositório de infraestrutura via Git para que
-essa etapa passe a fazer parte do comando instalado.
+Se houver migrations pendentes, o `mfupdate` salva um dump MySQL privado **antes
+de executar qualquer migration**, em `/docker/myfinance-backups` por padrão.
+`MIGRATION_BACKUP_DIR` permite escolher outro diretório. Uma falha de backup ou
+migration interrompe a implantação antes de trocar o tráfego. O dump permanece
+para recuperação; o script não restaura o banco automaticamente.
+
+As duas versões compartilham o banco durante a atualização. As migrations
+precisam ser compatíveis com a versão anterior: adicione estruturas novas antes
+de usá-las e remova estruturas antigas em uma atualização posterior. O backup
+de imagem não desfaz alterações no banco, mesmo quando a validação HTTP falha.
+`BACKUP_KEEP` mantém até três backups de imagem por padrão. A limpeza preserva
+as tags das duas imagens referenciadas pelo estado dos slots, além dos backups,
+e não remove volumes.

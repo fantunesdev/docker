@@ -1,36 +1,35 @@
 #!/bin/sh
-
 set -eu
 
 BASEDIR="${BASEDIR:-/docker/myfinance}"
-BKP_IMAGE="docker_myfinance_app-myfin-bkp:$(date +'%Y%m%d-%H%M%S')"
-TEST_CONTAINER="myfinance-update-test-$$"
 TEST_TIMEOUT="${TEST_TIMEOUT:-60}"
+DRAIN_TIMEOUT="${DRAIN_TIMEOUT:-60}"
 BACKUP_KEEP="${BACKUP_KEEP:-3}"
-TEST_OVERRIDE=''
+DEPLOY_ID="$(date +%Y%m%d-%H%M%S)-$$"
+BKP_IMAGE="docker_myfinance_app-myfin-bkp:$DEPLOY_ID"
+RELEASE_IMAGE="myfinance-release:$DEPLOY_ID"
+TEST_CONTAINER="myfinance-update-test-$$"
 MIGRATION_BACKUP_TEMP=''
+CANDIDATE=''
+SWITCHING=false
+COMMITTED=false
+LOCKED=false
 
-case "$TEST_TIMEOUT" in
-    ''|0*|*[!0-9]*)
-        echo 'TEST_TIMEOUT deve ser um número inteiro positivo.' >&2
-        exit 1
-        ;;
-esac
-
-case "$BACKUP_KEEP" in
-    ''|0*|*[!0-9]*)
-        echo 'BACKUP_KEEP deve ser um número inteiro positivo.' >&2
-        exit 1
-        ;;
-esac
-
+for VALUE in "$TEST_TIMEOUT" "$DRAIN_TIMEOUT" "$BACKUP_KEEP"; do
+    case "$VALUE" in ''|0*|*[!0-9]*)
+        echo 'TEST_TIMEOUT, DRAIN_TIMEOUT e BACKUP_KEEP devem ser inteiros positivos.' >&2
+        exit 1 ;;
+    esac
+done
 cd "$BASEDIR"
-if docker compose version >/dev/null 2>&1; then
-    COMPOSE_V2=true
-else
-    COMPOSE_V2=false
+STATE="$BASEDIR/.mfdeploy"
+mkdir -p "$STATE"
+if ! mkdir "$STATE/lock" 2>/dev/null; then
+    echo 'Outro mfupdate está em execução (ou deixou .mfdeploy/lock após uma interrupção abrupta).' >&2
+    exit 1
 fi
-
+LOCKED=true
+if docker compose version >/dev/null 2>&1; then COMPOSE_V2=true; else COMPOSE_V2=false; fi
 compose() {
     if [ "$COMPOSE_V2" = true ]; then
         docker compose -f "$BASEDIR/docker-compose.yml" "$@"
@@ -38,6 +37,8 @@ compose() {
         docker-compose -f "$BASEDIR/docker-compose.yml" "$@"
     fi
 }
+current_compose() { BASEDIR="$BASEDIR" "$BASEDIR/mfcompose" "$@"; }
+candidate_compose() { compose --profile "$NEXT" -f "$STATE/$NEXT.yml" "$@"; }
 
 clean_docker_images() {
     echo "Limpando Docker; mantendo o backup atual e até $BACKUP_KEEP backups no total..."
@@ -63,6 +64,16 @@ clean_docker_images() {
         echo 'Aviso: não foi possível listar os backups antigos.' >&2
     fi
 
+    # As duas referências persistidas precisam sobreviver também a um reboot.
+    if RELEASE_TAGS=$(docker image ls --filter 'reference=myfinance-release:*' --format '{{.Repository}}:{{.Tag}}'); then
+        for RELEASE_TAG in $RELEASE_TAGS; do
+            [ "$RELEASE_TAG" = "$RELEASE_IMAGE" ] && continue
+            if ! grep -F -q "image: $RELEASE_TAG" "$STATE/blue.yml" "$STATE/green.yml" 2>/dev/null; then
+                docker image rm "$RELEASE_TAG" || echo "Aviso: não foi possível remover $RELEASE_TAG." >&2
+            fi
+        done
+    fi
+
     # Não usa image prune -a, system prune ou volume prune: mantém imagens com
     # tag de outros serviços e todos os volumes, inclusive o banco de dados.
     docker builder prune -a -f || \
@@ -72,138 +83,163 @@ clean_docker_images() {
 }
 
 cleanup() {
-    if [ -n "$MIGRATION_BACKUP_TEMP" ]; then
-        rm -f "$MIGRATION_BACKUP_TEMP"
+    STATUS=$?
+    trap - 0 INT TERM
+    set +e
+    if [ "$SWITCHING" = true ] && [ "$COMMITTED" != true ]; then
+        echo 'Restaurando o destino anterior do Nginx...' >&2
+        cp "$STATE/previous-nginx.conf" "$STATE/nginx/default.conf"
+        if [ "$ACTIVE" = legacy ]; then rm -f "$STATE/active";
+        else printf '%s\n' "$ACTIVE" > "$STATE/active"; fi
+        docker update --restart=unless-stopped "$CURRENT_CONTAINER" >/dev/null
+        if ! docker exec nginx-myfin nginx -t || ! docker exec nginx-myfin nginx -s reload; then
+            echo 'Falha ao restaurar o Nginx; os dois aplicativos foram preservados para recuperação manual.' >&2
+            CANDIDATE=''
+        fi
+    fi
+    if [ "$COMMITTED" != true ] && [ -n "$CANDIDATE" ]; then
+        docker rm -f "$CANDIDATE" >/dev/null 2>&1 || true
     fi
     docker rm -f "$TEST_CONTAINER" >/dev/null 2>&1 || true
-    if [ -n "$TEST_OVERRIDE" ]; then
-        rm -f "$TEST_OVERRIDE"
+    [ -z "$MIGRATION_BACKUP_TEMP" ] || rm -f "$MIGRATION_BACKUP_TEMP"
+    if [ "$COMMITTED" = true ] && [ "$STATUS" -ne 0 ]; then
+        echo "O novo slot $NEXT está ativo, mas a finalização falhou. Verifique o worker e o container antigo." >&2
     fi
+    if [ "$LOCKED" = true ]; then rmdir "$STATE/lock"; fi
+    exit "$STATUS"
 }
 trap cleanup 0
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# Exige o serviço atual ativo: o teste usa sua rede, banco e Redis.
-CURRENT_CONTAINER=$(compose ps -q app-myfin)
-if [ -z "$CURRENT_CONTAINER" ]; then
-    echo 'O serviço app-myfin precisa estar em execução para validar a atualização.' >&2
+ACTIVE=legacy
+if [ -f "$STATE/active" ]; then ACTIVE=$(cat "$STATE/active"); fi
+case "$ACTIVE" in
+    legacy) CURRENT_SERVICE=app-myfin; NEXT=blue; PREVIOUS=legacy ;;
+    blue) CURRENT_SERVICE=app-myfin-blue; NEXT=green; PREVIOUS=blue ;;
+    green) CURRENT_SERVICE=app-myfin-green; NEXT=blue; PREVIOUS=green ;;
+    *) echo 'Estado de deploy inválido.' >&2; exit 1 ;;
+esac
+CURRENT_CONTAINER=$(current_compose ps -q "$CURRENT_SERVICE")
+if [ -z "$CURRENT_CONTAINER" ] || [ "$(docker inspect --format '{{.State.Running}}' "$CURRENT_CONTAINER")" != true ]; then
+    echo 'A aplicação atual precisa estar em execução para validar a atualização.' >&2
     exit 1
 fi
 ACTUAL_IMAGE=$(docker inspect --format '{{.Image}}' "$CURRENT_CONTAINER")
 docker tag "$ACTUAL_IMAGE" "$BKP_IMAGE"
 echo "Backup da imagem atual: $BKP_IMAGE"
-
-# Libera espaço antes de criar as novas camadas da imagem.
 clean_docker_images
 
 git -C myfinance pull --ff-only
-compose build --no-cache app-myfin
-
-# O container temporário compartilha a rede, mas não o IP fixo da aplicação.
-TEST_OVERRIDE=$(mktemp "${TMPDIR:-/tmp}/mfupdate-compose.XXXXXX")
-cat > "$TEST_OVERRIDE" <<'YAML'
+compose --profile legacy build --no-cache app-myfin
+VALIDATED_IMAGE=$(docker image inspect --format '{{.Id}}' myfinance-app-myfin)
+docker tag "$VALIDATED_IMAGE" "$RELEASE_IMAGE"
+if [ "$NEXT" = blue ]; then NEXT_IP=172.18.0.8; else NEXT_IP=172.18.0.9; fi
+# Nunca remove o slot ativo. O inativo pode ter sobrado de uma execução interrompida.
+docker rm -f "app-myfin-$NEXT" >/dev/null 2>&1 || true
+mkdir -p "$STATE/assets/$NEXT/static" "$STATE/nginx"
+cat > "$STATE/$NEXT.yml" <<YAML
 services:
-  app-myfin:
-    networks:
-      myfin-net:
-        ipv4_address: ""
+  app-myfin-$NEXT:
+    image: $RELEASE_IMAGE
+  investment-history:
+    image: $RELEASE_IMAGE
+  nginx-myfin:
+    volumes:
+      - $STATE/nginx:/etc/nginx/conf.d:ro
 YAML
-
-# Não publica portas nem inicia dependências. Evita collectstatic, que alteraria
-# os arquivos estáticos compartilhados com a aplicação que ainda está no ar.
-# Aplica as migrations da nova imagem antes do teste HTTP, que pode depender do
-# novo esquema. O banco é compartilhado: o backup de imagem não desfaz migrations.
-compose -f "$TEST_OVERRIDE" run -d --no-deps --name "$TEST_CONTAINER" app-myfin \
-    sh -c 'python manage.py check && python manage.py migrate --noinput && exec daphne -b 0.0.0.0 -p 8000 myfinance.asgi:application'
-
-VALIDATED_IMAGE=$(docker inspect --format '{{.Image}}' "$TEST_CONTAINER")
-echo "Aplicando migrations e validando a nova imagem por até ${TEST_TIMEOUT}s..."
-DEADLINE=$(($(date +%s) + TEST_TIMEOUT))
-READY=false
-while [ "$(date +%s)" -lt "$DEADLINE" ]; do
-    if [ "$(docker inspect --format '{{.State.Running}}' "$TEST_CONTAINER")" != true ]; then
-        break
-    fi
-    if docker exec -i "$TEST_CONTAINER" python - <<'PY'
-import os
-import http.client
-
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'myfinance.settings')
-import django
-django.setup()
-from django.conf import settings
-from django.db import connection
-
-with connection.cursor() as cursor:
-    cursor.execute('SELECT 1')
-    assert cursor.fetchone()[0] == 1
-
-host = next((h.lstrip('.') for h in settings.ALLOWED_HOSTS if h != '*'), 'localhost')
-client = http.client.HTTPConnection('127.0.0.1', 8000, timeout=2)
-try:
-    client.request('GET', '/', headers={'Host': host})
-    response = client.getresponse()
-    if not 200 <= response.status < 400:
-        print(f'Aplicação ainda não está pronta: HTTP {response.status}.', flush=True)
-        raise SystemExit(1)
-except OSError:
-    print('Aguardando a aplicação iniciar e aceitar conexões...', flush=True)
-    raise SystemExit(1)
-finally:
-    client.close()
-PY
-    then
-        READY=true
-        break
-    fi
-    sleep 2
-done
-
-if [ "$READY" != true ]; then
-    echo 'Validação falhou. Os containers atuais continuam em execução.' >&2
-    echo 'O banco pode ter recebido migrations; o backup da imagem não restaura o banco.' >&2
-    docker logs "$TEST_CONTAINER" >&2 || true
-    exit 1
-fi
-
-# O check HTTP valida a imagem, mas não garante que as tabelas dos models existem.
-# Executa as migrations da imagem validada antes de substituir a aplicação atual.
+# O processo de preparação não atende tráfego e não altera estáticos da versão ativa.
+candidate_compose run -d --no-deps --name "$TEST_CONTAINER" "app-myfin-$NEXT" sh -c 'exec sleep 86400'
+docker exec "$TEST_CONTAINER" python manage.py check
 if docker exec "$TEST_CONTAINER" python manage.py migrate --check >/dev/null 2>&1; then
     echo 'Banco de dados já está com as migrações aplicadas.'
 else
     MIGRATION_BACKUP_DIR="${MIGRATION_BACKUP_DIR:-$(dirname "$BASEDIR")/myfinance-backups}"
     mkdir -p -m 700 "$MIGRATION_BACKUP_DIR"
     MIGRATION_BACKUP_TEMP=$(mktemp "$MIGRATION_BACKUP_DIR/.before-migrations.XXXXXX")
-    compose exec -T mysql-myfin sh -c 'export MYSQL_PWD="$MYSQL_PASSWORD"; exec mysqldump --single-transaction --no-tablespaces --set-gtid-purged=OFF -u "$MYSQL_USER" "$MYSQL_DATABASE"' > "$MIGRATION_BACKUP_TEMP"
+    current_compose exec -T mysql-myfin sh -c 'export MYSQL_PWD="$MYSQL_PASSWORD"; exec mysqldump --single-transaction --no-tablespaces --set-gtid-purged=OFF -u "$MYSQL_USER" "$MYSQL_DATABASE"' > "$MIGRATION_BACKUP_TEMP"
     test -s "$MIGRATION_BACKUP_TEMP"
-    MIGRATION_BACKUP_FILE="$MIGRATION_BACKUP_DIR/myfinance-before-migrations-$(date +%Y%m%d-%H%M%S)-$$.sql"
+    MIGRATION_BACKUP_FILE="$MIGRATION_BACKUP_DIR/myfinance-before-migrations-$DEPLOY_ID.sql"
     mv "$MIGRATION_BACKUP_TEMP" "$MIGRATION_BACKUP_FILE"
     MIGRATION_BACKUP_TEMP=''
     echo "Backup do banco antes das migrações: $MIGRATION_BACKUP_FILE"
     docker exec "$TEST_CONTAINER" python manage.py migrate --noinput
     docker exec "$TEST_CONTAINER" python manage.py migrate --check
 fi
-
-# Só derruba a aplicação atual depois de validar e remover o container de teste.
+docker exec "$TEST_CONTAINER" python manage.py collectstatic --no-input --verbosity 0
 docker rm -f "$TEST_CONTAINER"
-echo 'Imagem validada. Instalando o serviço OpenRC e reiniciando...'
+CANDIDATE="app-myfin-$NEXT"
+candidate_compose up -d --no-deps "app-myfin-$NEXT"
+echo "Validando $CANDIDATE por até ${TEST_TIMEOUT}s..."
+DEADLINE=$(($(date +%s) + TEST_TIMEOUT))
+READY=false
+while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+    if [ "$(docker inspect --format '{{.State.Running}}' "$CANDIDATE")" != true ]; then break; fi
+    if docker exec -i "$CANDIDATE" python - < "$BASEDIR/deploy/healthcheck.py"
+    then READY=true; break; fi
+    sleep 2
+done
+if [ "$READY" != true ]; then
+    echo 'Validação falhou. A aplicação anterior continua ativa; migrations não são desfeitas.' >&2
+    docker logs "$CANDIDATE" >&2 || true
+    exit 1
+fi
+if [ "$(docker inspect --format '{{.Image}}' "$CANDIDATE")" != "$VALIDATED_IMAGE" ]; then
+    echo 'A imagem iniciada difere da imagem validada.' >&2; exit 1
+fi
+
 sudo install -m 0755 "$BASEDIR/myfinance.init.d" /etc/init.d/myfinance
-sudo rc-service --ifstarted myfinance stop
-compose down
-sudo rc-service myfinance start
 
-ACTIVE_CONTAINER=$(compose ps -q app-myfin)
-if [ -z "$ACTIVE_CONTAINER" ]; then
-    echo 'Falha: o aplicativo não está em execução após o reinício.' >&2
-    exit 1
+# Na primeira adoção, muda o bind mount de arquivo para diretório.
+# Preserva inicialmente o upstream legado; só troca após a preparação do proxy.
+if [ "$ACTIVE" = legacy ]; then
+    cp "$BASEDIR/nginx/default.conf" "$STATE/nginx/default.conf"
+    mkdir -p "$STATE/assets/legacy/static"
+    cp -a "$BASEDIR/static/." "$STATE/assets/legacy/static/"
+    candidate_compose up -d --no-deps nginx-myfin
+    # O proxy TLS resolve nginx-myfin ao carregar a configuração. A recriação
+    # pode mudar seu IP na rede externa; força uma nova resolução nessa adoção.
+    if [ "$(docker inspect --format '{{.State.Running}}' nginx-proxy 2>/dev/null || true)" = true ]; then
+        docker exec nginx-proxy nginx -t
+        docker exec nginx-proxy nginx -s reload
+    fi
 fi
-ACTIVE_IMAGE=$(docker inspect --format '{{.Image}}' "$ACTIVE_CONTAINER")
-if [ "$ACTIVE_IMAGE" != "$VALIDATED_IMAGE" ]; then
-    echo "Falha: a imagem ativa ($ACTIVE_IMAGE) difere da imagem validada ($VALIDATED_IMAGE)." >&2
-    exit 1
+cp "$STATE/nginx/default.conf" "$STATE/previous-nginx.conf"
+sed -e "s/@UPSTREAM@/$NEXT_IP/g" -e "s/@ACTIVE@/$NEXT/g" -e "s/@PREVIOUS@/$PREVIOUS/g" \
+    "$BASEDIR/nginx/bluegreen.conf.template" > "$STATE/$NEXT.nginx.conf"
+cp "$STATE/$NEXT.nginx.conf" "$STATE/next-nginx.conf"
+SWITCHING=true
+mv "$STATE/next-nginx.conf" "$STATE/nginx/default.conf"
+docker exec nginx-myfin nginx -t
+# Persiste antes do reload: um reboot já encontra o novo serviço e sua imagem fixa.
+printf '%s\n' "$NEXT" > "$STATE/active.next"
+mv "$STATE/active.next" "$STATE/active"
+docker exec nginx-myfin nginx -s reload
+# Valida também o caminho pelo proxy; não basta o container responder diretamente.
+DEADLINE=$(($(date +%s) + TEST_TIMEOUT))
+PROXY_READY=false
+while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+    if docker exec -i "$CANDIDATE" python - "$NEXT" < "$BASEDIR/deploy/healthcheck.py"; then
+        PROXY_READY=true; break
+    fi
+    sleep 2
+done
+if [ "$PROXY_READY" != true ]; then
+    echo 'O Nginx não confirmou o novo slot; revertendo a troca.' >&2; exit 1
 fi
-echo "Atualização concluída. Imagem ativa: $ACTIVE_IMAGE"
-
-# Remove também o cache gerado pelo build desta atualização.
+# Retira o reinício automático do antigo antes da drenagem, inclusive após reboot.
+docker update --restart=no "$CURRENT_CONTAINER"
+COMMITTED=true
+echo "Tráfego direcionado para $NEXT. Aguardando até ${DRAIN_TIMEOUT}s pelas conexões antigas..."
+# Os workers antigos do Nginx conservam requisições e WebSockets durante o reload.
+DEADLINE=$(($(date +%s) + DRAIN_TIMEOUT))
+while docker exec nginx-myfin sh -c 'ps | grep "[n]ginx: worker process is shutting down" >/dev/null'; do
+    [ "$(date +%s)" -lt "$DEADLINE" ] || break
+    sleep 2
+done
+docker stop -t 10 "$CURRENT_CONTAINER"
+docker rm "$CURRENT_CONTAINER"
+# Reinicia somente o worker, na mesma imagem da aplicação; banco e Redis permanecem.
+current_compose up -d --no-deps investment-history
+echo "Atualização concluída. Slot ativo: $NEXT; imagem: $VALIDATED_IMAGE"
 clean_docker_images

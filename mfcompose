@@ -1,0 +1,28 @@
+#!/bin/sh
+# Usa a versão persistida pelo mfupdate, inclusive durante o boot.
+set -eu
+BASEDIR="${BASEDIR:-/docker/myfinance}"
+cd "$BASEDIR"
+RESTORE_PROXY=false
+if [ "${1:-}" = up ]; then RESTORE_PROXY=true; fi
+ACTIVE=legacy
+if [ -f .mfdeploy/active ]; then
+    ACTIVE=$(cat .mfdeploy/active)
+    case "$ACTIVE" in blue|green) ;; *) echo 'Estado de deploy inválido.' >&2; exit 1 ;; esac
+    if [ "$RESTORE_PROXY" = true ]; then
+        # Repara uma interrupção entre a publicação do upstream e a seleção do slot.
+        cp ".mfdeploy/$ACTIVE.nginx.conf" .mfdeploy/nginx/restore.conf.tmp
+        mv .mfdeploy/nginx/restore.conf.tmp .mfdeploy/nginx/default.conf
+    fi
+    set -- -f "$BASEDIR/.mfdeploy/$ACTIVE.yml" "$@"
+fi
+set -- -f "$BASEDIR/docker-compose.yml" --profile "$ACTIVE" "$@"
+if docker compose version >/dev/null 2>&1; then
+    docker compose "$@"
+else
+    docker-compose "$@"
+fi
+if [ "$RESTORE_PROXY" = true ] && [ "$ACTIVE" != legacy ]; then
+    docker exec nginx-myfin nginx -t
+    docker exec nginx-myfin nginx -s reload
+fi

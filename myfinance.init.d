@@ -3,8 +3,8 @@
 name="myfinance"
 description="MyFinance Docker Compose Service"
 
-command="/usr/bin/docker-compose"
-command_args="-f /docker/myfinance/docker-compose.yml up -d"
+command="/docker/myfinance/mfcompose"
+command_args="up -d"
 pidfile="/run/${RC_SVCNAME}.pid"
 
 depend() {
@@ -18,13 +18,13 @@ start_pre() {
 
 start() {
     ebegin "Starting ${name}"
-    /usr/bin/docker-compose -f /docker/myfinance/docker-compose.yml up -d
+    /docker/myfinance/mfcompose up -d
     eend $?
 }
 
 stop() {
     ebegin "Stopping ${name}"
-    /usr/bin/docker-compose -f /docker/myfinance/docker-compose.yml down
+    /docker/myfinance/mfcompose down
     eend $?
 }
 

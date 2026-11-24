@@ -8,3 +8,6 @@ static/
 
 # Backups de runtime não pertencem ao código da infraestrutura.
 /backups/
+
+# Estado persistente do deploy blue/green.
+/.mfdeploy/
