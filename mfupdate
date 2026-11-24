@@ -195,7 +195,8 @@ sudo install -m 0755 "$BASEDIR/myfinance.init.d" /etc/init.d/myfinance
 if [ "$ACTIVE" = legacy ]; then
     cp "$BASEDIR/nginx/default.conf" "$STATE/nginx/default.conf"
     mkdir -p "$STATE/assets/legacy/static"
-    cp -a "$BASEDIR/static/." "$STATE/assets/legacy/static/"
+    # Copia conteúdo e links sem tentar preservar donos dos arquivos do container.
+    cp -R "$BASEDIR/static/." "$STATE/assets/legacy/static/"
     candidate_compose up -d --no-deps nginx-myfin
     # O proxy TLS resolve nginx-myfin ao carregar a configuração. A recriação
     # pode mudar seu IP na rede externa; força uma nova resolução nessa adoção.
