@@ -171,10 +171,10 @@ class MigrationDeploymentTests(unittest.TestCase):
                 self.assertEqual(state['stopped'], f'app-myfin-{active}')
                 self.assertEqual((self.project / '.mfdeploy/active').read_text().strip(), expected)
                 ups = [a for a in state['calls'] if 'up' in a]
-                self.assertEqual([a[-1] for a in ups], [f'app-myfin-{expected}', 'investment-history'])
+                self.assertEqual([a[-1] for a in ups], [f'app-myfin-{expected}', 'investment-history', 'password-reset-email'])
                 self.assertTrue(all('--no-deps' in a for a in ups))
                 override = (self.project / f'.mfdeploy/{expected}.yml').read_text()
-                self.assertEqual(override.count('image: myfinance-release:'), 2)
+                self.assertEqual(override.count('image: myfinance-release:'), 3)
 
     def test_boot_loads_active_slot_and_pinned_images_with_compose_v1_and_v2(self):
         for v1 in ('', '1'):
@@ -219,6 +219,8 @@ class ComposeConfigurationTests(unittest.TestCase):
     image: myfinance-release:fixture
   investment-history:
     image: myfinance-release:fixture
+  password-reset-email:
+    image: myfinance-release:fixture
   nginx-myfin:
     volumes:
       - {temporary}/nginx:/etc/nginx/conf.d:ro
@@ -235,6 +237,7 @@ class ComposeConfigurationTests(unittest.TestCase):
                     self.assertNotIn('build', app)
                     self.assertEqual(app['image'], 'myfinance-release:fixture')
                     self.assertEqual(services['investment-history']['image'], app['image'])
+                    self.assertEqual(services['password-reset-email']['image'], app['image'])
                     mounts = [v for v in services['nginx-myfin']['volumes'] if v['target'] == '/etc/nginx/conf.d']
                     self.assertEqual(len(mounts), 1)
                     self.assertEqual(mounts[0]['source'], temporary + '/nginx')

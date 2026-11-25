@@ -144,6 +144,8 @@ services:
     image: $RELEASE_IMAGE
   investment-history:
     image: $RELEASE_IMAGE
+  password-reset-email:
+    image: $RELEASE_IMAGE
   nginx-myfin:
     volumes:
       - $STATE/nginx:/etc/nginx/conf.d:ro
@@ -242,5 +244,6 @@ docker stop -t 10 "$CURRENT_CONTAINER"
 docker rm "$CURRENT_CONTAINER"
 # Reinicia somente o worker, na mesma imagem da aplicação; banco e Redis permanecem.
 current_compose up -d --no-deps investment-history
+current_compose up -d --no-deps password-reset-email
 echo "Atualização concluída. Slot ativo: $NEXT; imagem: $VALIDATED_IMAGE"
 clean_docker_images

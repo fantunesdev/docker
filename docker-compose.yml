@@ -19,6 +19,20 @@ x-app-runtime: &app-runtime
     SOCIAL_LOGIN_ENABLED: "${SOCIAL_LOGIN_ENABLED:-false}"
     GOOGLE_OAUTH2_KEY: "${GOOGLE_OAUTH2_KEY:-}"
     GOOGLE_OAUTH2_SECRET: "${GOOGLE_OAUTH2_SECRET:-}"
+    PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-}"
+    CACHE_URL: "${CACHE_URL:-redis://redis-myfin:6379/1}"
+    EMAIL_BACKEND: "${EMAIL_BACKEND:-login.email_backend.GmailBackend}"
+    GMAIL_CLIENT_ID: "${GMAIL_CLIENT_ID:-}"
+    GMAIL_CLIENT_SECRET: "${GMAIL_CLIENT_SECRET:-}"
+    GMAIL_REFRESH_TOKEN: "${GMAIL_REFRESH_TOKEN:-}"
+    GMAIL_REFRESH_TOKEN_FILE: "${GMAIL_REFRESH_TOKEN_FILE:-}"
+    GMAIL_SENDER_EMAIL: "${GMAIL_SENDER_EMAIL:-}"
+    DEFAULT_FROM_EMAIL: "${DEFAULT_FROM_EMAIL:-${GMAIL_SENDER_EMAIL:-}}"
+    EMAIL_TIMEOUT: "${EMAIL_TIMEOUT:-15}"
+    PASSWORD_RESET_TIMEOUT: "${PASSWORD_RESET_TIMEOUT:-1800}"
+    PASSWORD_RESET_RATE_WINDOW: "${PASSWORD_RESET_RATE_WINDOW:-900}"
+    PASSWORD_RESET_IP_LIMIT: "${PASSWORD_RESET_IP_LIMIT:-30}"
+    PASSWORD_RESET_EMAIL_LIMIT: "${PASSWORD_RESET_EMAIL_LIMIT:-3}"
     MYSQL_USER: "${MYFIN_MYSQL_USER}"
     MYSQL_PASSWORD: "${MYFIN_MYSQL_PASSWORD}"
     MYSQL_DATABASE: "${MYFIN_MYSQL_DATABASE}"
@@ -93,6 +107,21 @@ services:
     networks:
       myfin-net:
         ipv4_address: 172.18.0.7
+
+  password-reset-email:
+    container_name: myfinance-password-reset-email
+    image: myfinance-app-myfin
+    restart: unless-stopped
+    command: ["python", "manage.py", "process_password_reset_emails"]
+    environment: *myfinance-environment
+    volumes:
+      - ./myfinance/logs/:/myfinance/logs/
+    depends_on:
+      - mysql-myfin
+      - redis-myfin
+    networks:
+      myfin-net:
+        ipv4_address: 172.18.0.10
 
   mysql-myfin:
     container_name: mysql-myfin

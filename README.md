@@ -370,3 +370,33 @@ de imagem não desfaz alterações no banco, mesmo quando a validação HTTP fal
 `BACKUP_KEEP` mantém até três backups de imagem por padrão. A limpeza preserva
 as tags das duas imagens referenciadas pelo estado dos slots, além dos backups,
 e não remove volumes.
+
+
+## Recuperação de senha
+
+Atualize também o MyFinance. A migração `login.0008` cria a fila curta de envio,
+processada pelo serviço `password-reset-email`. O `mfupdate` fixa esse worker na
+mesma imagem da aplicação e o recria após a troca do slot, junto do worker de
+investimentos. Os tokens de recuperação não são armazenados na fila.
+
+No `.env` de produção, configure `PUBLIC_BASE_URL`, `EMAIL_BACKEND`,
+`GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`,
+`GMAIL_SENDER_EMAIL` e `DEFAULT_FROM_EMAIL`. As credenciais Gmail são separadas
+das do login social e são repassadas pelo bloco compartilhado de ambiente.
+O backend de produção é `login.email_backend.GmailBackend`.
+
+O procedimento de autorização Google e os comandos estão no documento
+`myfinance/docs/recuperacao-senha.md`. Em desenvolvimento, o worker herda o `.env`
+do checkout montado; com `DEBUG` ativo o padrão é enviar ao console, sem chamar
+Gmail. Não use esse backend de console em produção.
+
+Atualize o Compose e publique pelo `mfupdate`. No desenvolvimento, aplique
+`python manage.py migrate` no serviço `app-myfin` e suba também o serviço
+`password-reset-email` com o mesmo Compose de desenvolvimento. Reiniciar um
+container existente não adiciona serviços nem atualiza o ambiente.
+
+As configurações Nginx deste repositório omitem as URLs de recuperação com token
+dos access logs. Configure a mesma proteção no proxy HTTPS externo e em outros
+proxies que registrem essas URLs antes de liberar o recurso. Valide com `nginx -t`
+antes de recarregar. A configuração local correspondente está no repositório
+`reverse_proxy/nginx-proxy.conf`.

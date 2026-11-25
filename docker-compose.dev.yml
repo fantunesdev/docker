@@ -56,6 +56,13 @@ services:
     ports: []
     restart: on-failure
 
+  password-reset-email:
+    <<: *myfinance-dev-runtime
+    command: ["python", "manage.py", "process_password_reset_emails"]
+    ports: []
+    restart: on-failure
+
+
   mysql-myfin:
     image: mysql:8.4
     ports:

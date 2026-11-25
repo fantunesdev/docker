@@ -1,3 +1,9 @@
+# Password recovery URLs carry a secret token; omit them from access logs.
+map $uri $log_password_recovery {
+    default 1;
+    ~^/usuarios/senha/recuperar/[^/]+/[^/]+/ 0;
+}
+
 # The outer proxy and VM loopback are the only published entry points.
 map $http_x_forwarded_proto $original_scheme {
     default http;
@@ -14,6 +20,7 @@ upstream django.myfinance.com {
 }
 
 server {
+    access_log /var/log/nginx/access.log combined if=$log_password_recovery;
     listen 80;
     add_header X-Myfinance-Slot @ACTIVE@ always;
     # Endereço interno estável para clientes que usam app-myfin:8000.
