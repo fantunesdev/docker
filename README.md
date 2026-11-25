@@ -400,3 +400,22 @@ dos access logs. Configure a mesma proteção no proxy HTTPS externo e em outros
 proxies que registrem essas URLs antes de liberar o recurso. Valide com `nginx -t`
 antes de recarregar. A configuração local correspondente está no repositório
 `reverse_proxy/nginx-proxy.conf`.
+
+
+## Identidade e autenticação em duas etapas
+
+A migração `login.0009` adiciona confirmação de e-mail, dispositivos TOTP,
+códigos de recuperação armazenados por hash e auditoria de segurança. O worker
+`password-reset-email` também processa as confirmações de e-mail e os avisos de
+alteração de endereço. Reconstrua a imagem para instalar `django-otp` e `segno`.
+
+Configure `TWO_FACTOR_ENCRYPTION_KEY` no `.env` de produção antes de permitir
+ativação de autenticadores. Essa chave Fernet é separada de `SECRET_KEY` e das
+credenciais Google. Gere uma chave exclusiva da produção em ambiente seguro e
+guarde backup; perdê-la impede a validação dos autenticadores já cadastrados.
+Não substitua a chave em um deploy nem gere uma nova a cada inicialização.
+
+O Compose repassa a chave aos serviços Django. O procedimento funcional, as
+regras para API, sessão e recuperação administrativa estão documentados em
+`myfinance/docs/identidade-2fa.md`. As configurações Nginx omitem também os
+links de confirmação de e-mail dos access logs; atualize o proxy externo.
