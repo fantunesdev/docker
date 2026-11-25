@@ -59,6 +59,22 @@ O arquivo de ambiente do Compose não entra na imagem; essas três variáveis s�
 encaminhadas explicitamente ao Django. Os demais parâmetros continuam usando os
 mapeamentos existentes em `environment`. Não grave credenciais no Dockerfile.
 
+Para habilitar o login com Google, preencha no `.env` do Compose:
+
+```dotenv
+SOCIAL_LOGIN_ENABLED=true
+GOOGLE_OAUTH2_KEY=
+GOOGLE_OAUTH2_SECRET=
+```
+
+Essas variáveis são encaminhadas pelo bloco compartilhado `environment` aos
+serviços Django, incluindo os slots `blue` e `green`. O `.env` do Compose serve
+para interpolar os valores; declarar uma variável nele não a adiciona
+automaticamente ao container. Atualize este Compose no servidor e recrie o
+serviço ativo pelo fluxo habitual de deploy (`mfupdate`). Apenas `restart` não
+atualiza o ambiente de um container existente. A opção pessoal de login social
+no perfil também deve estar ativada.
+
 Mídia, logs, dados MySQL e modelos existentes continuam nos volumes/bind mounts.
 Excluir dados do build não os remove do disco nem substitui backup. Modelos e a
 fila SQLite do TC continuam no diretório persistido `training/model`.
