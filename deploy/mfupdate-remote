@@ -2,12 +2,18 @@
 
 set -eu
 
+UPDATE_MYFINANCE=false
+UPDATE_TC=false
+UPDATE_DOCKER=false
 for ARG in "$@"; do
     case "$ARG" in
-        -tc|-d) ;;
+        -a) UPDATE_MYFINANCE=true; UPDATE_TC=true; UPDATE_DOCKER=true ;;
+        -tc) UPDATE_TC=true ;;
+        -d) UPDATE_DOCKER=true ;;
         -h|--help)
-            echo 'Uso: mfupdate [-tc] [-d]'
+            echo 'Uso: mfupdate [-a] [-tc] [-d]'
             echo 'Sem argumentos: publica o MyFinance na VM.'
+            echo '-a: atualiza somente as branches atuais de MyFinance, transaction_classifier e Docker na VM.'
             echo '-tc: atualiza somente a branch atual de transaction_classifier na VM.'
             echo '-d: atualiza somente a branch atual do repositório Docker na VM.'
             echo 'As opções podem ser combinadas; não fazem build nem reiniciam serviços.'
@@ -17,10 +23,37 @@ for ARG in "$@"; do
 done
 
 if [ "$#" -gt 0 ]; then
-    REMOTE_COMMAND='set -eu; BASEDIR="${BASEDIR:-/docker/myfinance}"; export BASEDIR; exec "$BASEDIR/mfupdate"'
-    for ARG in "$@"; do
-        REMOTE_COMMAND="$REMOTE_COMMAND $ARG"
-    done
+    # Não chama o mfupdate remoto: versões antigas ignoram flags e fazem deploy.
+    REMOTE_BODY=$(cat <<'REMOTE'
+BASEDIR="${BASEDIR:-/docker/myfinance}"
+STATE="$BASEDIR/.mfdeploy"
+mkdir -p "$STATE"
+if ! mkdir "$STATE/lock" 2>/dev/null; then
+    echo 'Outro mfupdate está em execução (ou deixou .mfdeploy/lock).' >&2
+    exit 1
+fi
+trap 'rmdir "$STATE/lock"' 0
+trap 'exit 130' INT
+trap 'exit 143' TERM
+if [ "$UPDATE_MYFINANCE" = true ]; then
+    echo 'Atualizando a branch atual de MyFinance...'
+    git -C "$BASEDIR/myfinance" pull --ff-only
+fi
+if [ "$UPDATE_TC" = true ]; then
+    echo 'Atualizando a branch atual de transaction_classifier...'
+    git -C "$BASEDIR/transaction_classifier" pull --ff-only
+fi
+if [ "$UPDATE_DOCKER" = true ]; then
+    echo 'Atualizando a branch atual do repositório Docker...'
+    git -C "$BASEDIR" pull --ff-only
+fi
+REMOTE
+)
+    REMOTE_COMMAND="set -eu
+UPDATE_MYFINANCE=$UPDATE_MYFINANCE
+UPDATE_TC=$UPDATE_TC
+UPDATE_DOCKER=$UPDATE_DOCKER
+$REMOTE_BODY"
     exec ssh -t producao "$REMOTE_COMMAND"
 fi
 

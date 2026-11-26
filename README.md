@@ -295,6 +295,7 @@ diretório de backups; os arquivos servidos pelo Nginx ficam em `static/`.
 O `mfupdate` também aceita atualizações de código sem executar deploy:
 
 ```sh
+mfupdate -a        # atualiza MyFinance, classificador e Docker, nessa ordem
 mfupdate -tc       # git pull --ff-only em transaction_classifier/
 mfupdate -d        # git pull --ff-only no repositório Docker
 mfupdate -tc -d    # atualiza os dois, primeiro o classificador
@@ -307,10 +308,10 @@ Uma falha interrompe a sequência. O mesmo lock do deploy impede atualizações
 concorrentes. Sem argumentos, permanece o deploy habitual do MyFinance.
 
 O acionador SSH fica versionado em `deploy/mfupdate-remote` e pode ser instalado
-como `~/git/bin/mfupdate`. Ele encaminha as opções para
-`/docker/myfinance/mfupdate` na VM `producao`. Para adotar essas opções pela
-primeira vez, atualize este checkout na VM com `git pull --ff-only`; depois
-`mfupdate -d` poderá atualizar o próprio repositório. Os caminhos seguem o
+como `~/git/bin/mfupdate`. Com opções, ele executa os pulls diretamente por SSH
+na VM `producao`, sem chamar o script de deploy remoto. Isso permite usar
+`mfupdate -d` mesmo quando a VM ainda tem um `mfupdate` antigo, que ignoraria
+os argumentos e iniciaria um deploy. Os caminhos seguem o
 `BASEDIR` configurado no ambiente remoto, com padrão `/docker/myfinance`.
 
 Execute `mfupdate` como antes, após atualizar este checkout de infraestrutura

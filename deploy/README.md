@@ -106,7 +106,10 @@ commits; ele é um caminho manual separado e não participa do novo pipeline.
 Sua cópia versionada está em `deploy/mfupdate-remote`. As opções `-tc` e `-d`
 atualizam somente as branches atuais do classificador e da infraestrutura,
 respectivamente, sem publicar o MyFinance nem registrar versão. Podem ser
-combinadas; sem argumentos, o acionador mantém o deploy manual do MyFinance.
+combinadas. A opção `-a` atualiza os três repositórios, na ordem MyFinance,
+classificador e Docker. Com opções, o acionador executa os pulls diretamente
+por SSH, sem depender da versão do script remoto e sem chamá-lo. Sem argumentos,
+o acionador mantém o deploy manual do MyFinance.
 O deploy não executa mais `builder prune` ou `image prune` globais. A manutenção
 de caches do host e a retenção de imagens no GHCR devem ser feitas separadamente.
 

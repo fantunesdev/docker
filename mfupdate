@@ -2,15 +2,18 @@
 set -eu
 
 BASEDIR="${BASEDIR:-/docker/myfinance}"
+UPDATE_MYFINANCE=false
 UPDATE_TC=false
 UPDATE_DOCKER=false
 for ARG in "$@"; do
     case "$ARG" in
+        -a) UPDATE_MYFINANCE=true; UPDATE_TC=true; UPDATE_DOCKER=true ;;
         -tc) UPDATE_TC=true ;;
         -d) UPDATE_DOCKER=true ;;
         -h|--help)
-            echo 'Uso: mfupdate [-tc] [-d]'
+            echo 'Uso: mfupdate [-a] [-tc] [-d]'
             echo 'Sem argumentos: publica o MyFinance pelo fluxo habitual.'
+            echo '-a: atualiza somente as branches atuais de MyFinance, transaction_classifier e Docker.'
             echo '-tc: atualiza somente a branch atual de transaction_classifier.'
             echo '-d: atualiza somente a branch atual do repositório Docker.'
             echo 'As opções podem ser combinadas; não fazem build nem reiniciam serviços.'
@@ -25,6 +28,7 @@ if [ "$UPDATE_TC" = true ] || [ "$UPDATE_DOCKER" = true ]; then
         basedir=$1
         update_tc=$2
         update_docker=$3
+        update_myfinance=$4
         state="$basedir/.mfdeploy"
         mkdir -p "$state"
         if ! mkdir "$state/lock" 2>/dev/null; then
@@ -34,6 +38,10 @@ if [ "$UPDATE_TC" = true ] || [ "$UPDATE_DOCKER" = true ]; then
         trap '\''rmdir "$state/lock"'\'' 0
         trap '\''exit 130'\'' INT
         trap '\''exit 143'\'' TERM
+        if [ "$update_myfinance" = true ]; then
+            echo "Atualizando a branch atual de MyFinance..."
+            git -C "$basedir/myfinance" pull --ff-only
+        fi
         if [ "$update_tc" = true ]; then
             echo "Atualizando a branch atual de transaction_classifier..."
             git -C "$basedir/transaction_classifier" pull --ff-only
@@ -42,7 +50,7 @@ if [ "$UPDATE_TC" = true ] || [ "$UPDATE_DOCKER" = true ]; then
             echo "Atualizando a branch atual do repositório Docker..."
             git -C "$basedir" pull --ff-only
         fi
-    ' sh "$BASEDIR" "$UPDATE_TC" "$UPDATE_DOCKER"
+    ' sh "$BASEDIR" "$UPDATE_TC" "$UPDATE_DOCKER" "$UPDATE_MYFINANCE"
 fi
 TEST_TIMEOUT="${TEST_TIMEOUT:-60}"
 DRAIN_TIMEOUT="${DRAIN_TIMEOUT:-60}"

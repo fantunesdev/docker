@@ -9,6 +9,14 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+UPDATE_CASES = [
+    (('-tc',), ['transaction_classifier']),
+    (('-d',), ['']),
+    (('-a',), ['myfinance', 'transaction_classifier', '']),
+    (('-d', '-tc'), ['transaction_classifier', '']),
+    (('-tc', '-tc'), ['transaction_classifier']),
+    (('-tc', '-a', '-d', '-a'), ['myfinance', 'transaction_classifier', '']),
+]
 
 
 class UpdateArgumentsTests(unittest.TestCase):
@@ -54,10 +62,7 @@ if name != 'ssh':
         return [json.loads(line) for line in self.calls.read_text().splitlines()] if self.calls.exists() else []
 
     def test_flags_select_only_requested_repositories_and_deduplicate(self):
-        cases = [(('-tc',), ['transaction_classifier']), (('-d',), ['']),
-                 (('-d', '-tc'), ['transaction_classifier', '']),
-                 (('-tc', '-tc'), ['transaction_classifier'])]
-        for flags, paths in cases:
+        for flags, paths in UPDATE_CASES:
             with self.subTest(flags=flags):
                 self.calls.unlink(missing_ok=True)
                 result = self.run_script(*flags)
@@ -67,20 +72,26 @@ if name != 'ssh':
                 self.assertFalse((self.project / '.mfdeploy/lock').exists())
 
     def test_failure_stops_updates_releases_lock_and_preserves_exit_code(self):
-        result = self.run_script('-tc', '-d', GIT_STATUS='7')
-        self.assertEqual(result.returncode, 7, result.stderr)
-        self.assertEqual(len(self.recorded_calls()), 1)
-        self.assertFalse((self.project / '.mfdeploy/lock').exists())
+        for launcher in (False, True):
+            with self.subTest(launcher=launcher):
+                self.calls.unlink(missing_ok=True)
+                result = self.run_script('-a', launcher=launcher, EXECUTE_SSH='1', GIT_STATUS='7')
+                self.assertEqual(result.returncode, 7, result.stderr)
+                self.assertEqual(sum(call[0] == 'git' for call in self.recorded_calls()), 1)
+                self.assertFalse((self.project / '.mfdeploy/lock').exists())
 
     def test_branch_updates_share_deploy_lock(self):
         (self.project / '.mfdeploy/lock').mkdir(parents=True)
-        result = self.run_script('-d')
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(self.recorded_calls(), [])
-        self.assertTrue((self.project / '.mfdeploy/lock').exists())
+        for launcher in (False, True):
+            with self.subTest(launcher=launcher):
+                self.calls.unlink(missing_ok=True)
+                result = self.run_script('-d', launcher=launcher, EXECUTE_SSH='1')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(any(call[0] == 'git' for call in self.recorded_calls()))
+                self.assertTrue((self.project / '.mfdeploy/lock').exists())
 
     def test_infrastructure_update_can_replace_running_script(self):
-        result = self.run_script('-d', REPLACE_SCRIPT='1')
+        result = self.run_script('-a', REPLACE_SCRIPT='1')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.project / 'mfupdate').read_text(), 'invalid replacement script')
         self.assertFalse((self.project / '.mfdeploy/lock').exists())
@@ -94,16 +105,22 @@ if name != 'ssh':
                     self.assertEqual(self.recorded_calls(), [])
                     self.assertFalse((self.project / '.mfdeploy').exists())
 
-    def test_launcher_forwards_flags_without_deploy_or_version_registration(self):
-        result = self.run_script('-tc', '-d', launcher=True, EXECUTE_SSH='1')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        calls = self.recorded_calls()
-        self.assertEqual(calls[0][:3], ['ssh', '-t', 'producao'])
-        self.assertNotIn('Version.objects', calls[0][-1])
-        self.assertEqual(calls[1:], [
-            ['git', '-C', str(self.project / 'transaction_classifier'), 'pull', '--ff-only'],
-            ['git', '-C', str(self.project), 'pull', '--ff-only'],
-        ])
+    def test_launcher_updates_selected_branches_without_running_legacy_remote_script(self):
+        # Reproduz a VM antiga: ignora os argumentos e inicia um build.
+        (self.project / 'mfupdate').write_text(
+            '#!/bin/sh\ntouch "$BASEDIR/legacy-deploy-started"\ndocker build .\n')
+        for flags, paths in UPDATE_CASES:
+            with self.subTest(flags=flags):
+                self.calls.unlink(missing_ok=True)
+                result = self.run_script(*flags, launcher=True, EXECUTE_SSH='1')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                calls = self.recorded_calls()
+                self.assertEqual(calls[0][:3], ['ssh', '-t', 'producao'])
+                self.assertNotIn('Version.objects', calls[0][-1])
+                self.assertEqual(calls[1:], [
+                    ['git', '-C', str(self.project / path), 'pull', '--ff-only'] for path in paths])
+                self.assertFalse((self.project / 'legacy-deploy-started').exists())
+                self.assertFalse((self.project / '.mfdeploy/lock').exists())
 
     def test_launcher_without_flags_keeps_myfinance_deploy(self):
         result = self.run_script(launcher=True)
