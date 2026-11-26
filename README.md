@@ -1,5 +1,14 @@
 # Docker MyFinance
 
+## CI/CD do MyFinance
+
+O pipeline GitHub Actions testa o MyFinance, constrói uma imagem no CI e publica
+na VM por digest usando o blue/green do `mfupdate`. A configuração do runner,
+das variáveis e a recuperação de falhas estão em [deploy/README.md](deploy/README.md).
+O modo manual do `mfupdate` continua disponível. A limpeza do deploy remove
+somente referências de imagens gerenciadas por ele; caches globais do Docker
+precisam de manutenção separada.
+
 ## HTTPS na VM da rede local
 
 O ambiente existente usa o Nginx do projeto `reverse_proxy` para terminar o TLS,
@@ -282,6 +291,27 @@ diretório de backups; os arquivos servidos pelo Nginx ficam em `static/`.
 
 
 ## Atualização blue/green e inicialização no Alpine Linux
+
+O `mfupdate` também aceita atualizações de código sem executar deploy:
+
+```sh
+mfupdate -tc       # git pull --ff-only em transaction_classifier/
+mfupdate -d        # git pull --ff-only no repositório Docker
+mfupdate -tc -d    # atualiza os dois, primeiro o classificador
+mfupdate --help
+```
+
+Com essas opções, somente a branch atual e seu upstream são atualizados; não há
+troca de branch, build, migrations, reinício de containers ou registro de versão.
+Uma falha interrompe a sequência. O mesmo lock do deploy impede atualizações
+concorrentes. Sem argumentos, permanece o deploy habitual do MyFinance.
+
+O acionador SSH fica versionado em `deploy/mfupdate-remote` e pode ser instalado
+como `~/git/bin/mfupdate`. Ele encaminha as opções para
+`/docker/myfinance/mfupdate` na VM `producao`. Para adotar essas opções pela
+primeira vez, atualize este checkout na VM com `git pull --ff-only`; depois
+`mfupdate -d` poderá atualizar o próprio repositório. Os caminhos seguem o
+`BASEDIR` configurado no ambiente remoto, com padrão `/docker/myfinance`.
 
 Execute `mfupdate` como antes, após atualizar este checkout de infraestrutura
 com `git -C /docker/myfinance pull --ff-only`. O script atualiza somente o clone

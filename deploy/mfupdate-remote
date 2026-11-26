@@ -1,0 +1,64 @@
+#!/bin/bash
+
+set -eu
+
+for ARG in "$@"; do
+    case "$ARG" in
+        -tc|-d) ;;
+        -h|--help)
+            echo 'Uso: mfupdate [-tc] [-d]'
+            echo 'Sem argumentos: publica o MyFinance na VM.'
+            echo '-tc: atualiza somente a branch atual de transaction_classifier na VM.'
+            echo '-d: atualiza somente a branch atual do repositório Docker na VM.'
+            echo 'As opções podem ser combinadas; não fazem build nem reiniciam serviços.'
+            exit 0 ;;
+        *) echo "Argumento desconhecido: $ARG. Use mfupdate --help." >&2; exit 1 ;;
+    esac
+done
+
+if [ "$#" -gt 0 ]; then
+    REMOTE_COMMAND='set -eu; BASEDIR="${BASEDIR:-/docker/myfinance}"; export BASEDIR; exec "$BASEDIR/mfupdate"'
+    for ARG in "$@"; do
+        REMOTE_COMMAND="$REMOTE_COMMAND $ARG"
+    done
+    exec ssh -t producao "$REMOTE_COMMAND"
+fi
+
+REMOTE_COMMAND=$(cat <<'REMOTE'
+set -eu
+
+BASEDIR="${BASEDIR:-/docker/myfinance}"
+BASEDIR="$BASEDIR" "$BASEDIR/mfupdate"
+
+# Conta os commits do código atualizado no servidor.
+NEW_VERSION=$(git -C "$BASEDIR/myfinance" rev-list --count HEAD)
+
+# Usa o slot que o deploy acabou de ativar para registrar a versão no banco.
+ACTIVE_SLOT=$(cat "$BASEDIR/.mfdeploy/active")
+case "$ACTIVE_SLOT" in
+    blue|green) ;;
+    *) echo 'Slot ativo inválido após a atualização.' >&2; exit 1 ;;
+esac
+BASEDIR="$BASEDIR" "$BASEDIR/mfcompose" exec -T "app-myfin-$ACTIVE_SLOT" python - "$NEW_VERSION" <<'PY'
+import os
+import sys
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'myfinance.settings')
+import django
+django.setup()
+
+from django.utils import timezone
+from statement.models import Version
+
+version = f'v2.0.{int(sys.argv[1])}'
+latest = Version.objects.order_by('-id').first()
+if latest is None or latest.version != version:
+    Version.objects.create(version=version, date=timezone.localdate())
+    print(f'Versão registrada: {version}')
+else:
+    print(f'Versão {version} já registrada.')
+PY
+REMOTE
+)
+
+ssh -t producao "$REMOTE_COMMAND"

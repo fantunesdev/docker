@@ -34,7 +34,13 @@ if name in ('docker', 'docker-compose'):
     elif args[0] == 'inspect':
         if 'Running' in args[2]: print('true')
         else: print('sha256:new' if args[-1] == state.get('candidate') else 'sha256:old')
-    elif args[:2] == ['image', 'inspect']: print('sha256:new')
+    elif args[:2] == ['image', 'inspect']:
+        if 'org.opencontainers.image.revision' in args[3]:
+            print('0' * 40 if scenario == 'commit-mismatch' else 'a' * 40)
+        elif 'io.myfinance.infrastructure.revision' in args[3]:
+            print('0' * 40 if scenario == 'infra-mismatch' else 'b' * 40)
+        else: print('sha256:new')
+    elif args[0] == 'pull' and scenario == 'pull-failure': status = 1
     elif args[0] == 'exec':
         if 'migrate' in args:
             if '--check' in args:
@@ -44,7 +50,10 @@ if name in ('docker', 'docker-compose'):
         elif 'python' in args and '-' in args:
             sys.stdin.read()
             proxy = args[-1] in ('blue', 'green')
-            if scenario == 'readiness-failure' or (scenario == 'proxy-failure' and proxy): status = 1
+            if len(args[-1]) == 40:
+                state['version_registered'] = scenario != 'version-failure'
+                if scenario == 'version-failure': status = 1
+            elif scenario == 'readiness-failure' or (scenario == 'proxy-failure' and proxy): status = 1
         elif 'nginx' in args and '-t' in args:
             state['nginx_tests'] = state.get('nginx_tests', 0) + 1
             if scenario == 'nginx-config-failure' and state['nginx_tests'] == 1: status = 1
@@ -53,6 +62,8 @@ if name in ('docker', 'docker-compose'):
             if scenario == 'reload-failure' and state['reloads'] == 1: status = 1
         elif args[-1].startswith('ps |'): status = 1
     elif args[0] == 'stop': state['stopped'] = args[-1]
+elif name == 'git' and args == ['rev-parse', 'HEAD']:
+    print('b' * 40)
 state_file.write_text(json.dumps(state))
 sys.exit(status)
 '''
@@ -68,7 +79,8 @@ class MigrationDeploymentTests(unittest.TestCase):
         for directory in ('myfinance', 'static', 'nginx', 'deploy'):
             (self.project / directory).mkdir()
         for filename in ('mfcompose', 'docker-compose.yml', 'myfinance.init.d',
-                         'nginx/default.conf', 'nginx/bluegreen.conf.template', 'deploy/healthcheck.py'):
+                         'nginx/default.conf', 'nginx/bluegreen.conf.template', 'deploy/healthcheck.py',
+                         'deploy/register_version.py'):
             shutil.copy2(ROOT / filename, self.project / filename)
         (self.project / 'static/old.css').write_text('old-style')
         binaries = self.root / 'bin'
@@ -166,6 +178,10 @@ class MigrationDeploymentTests(unittest.TestCase):
     def test_slots_alternate_without_recreating_nginx_or_dependencies(self):
         for active, expected in (('blue', 'green'), ('green', 'blue')):
             with self.subTest(active=active):
+                state_dir = self.project / '.mfdeploy'
+                state_dir.mkdir(exist_ok=True)
+                for extension in ('commit', 'image'):
+                    (state_dir / f'{expected}.{extension}').write_text('old-ci-metadata')
                 result, state = self.run_update(active=active)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(state['stopped'], f'app-myfin-{active}')
@@ -175,6 +191,8 @@ class MigrationDeploymentTests(unittest.TestCase):
                 self.assertTrue(all('--no-deps' in a for a in ups))
                 override = (self.project / f'.mfdeploy/{expected}.yml').read_text()
                 self.assertEqual(override.count('image: myfinance-release:'), 3)
+                self.assertFalse((state_dir / f'{expected}.commit').exists())
+                self.assertFalse((state_dir / f'{expected}.image').exists())
 
     def test_boot_loads_active_slot_and_pinned_images_with_compose_v1_and_v2(self):
         for v1 in ('', '1'):
@@ -199,6 +217,48 @@ class MigrationDeploymentTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertTrue(lock.exists())
         self.assertFalse(self.state_file.exists())
+
+    def use_ci_image(self):
+        self.env['DEPLOY_COMMIT'] = 'a' * 40
+        self.env['DEPLOY_IMAGE'] = 'ghcr.io/fantunesdev/myfinance@sha256:' + 'c' * 64
+
+    def test_ci_deploy_uses_approved_image_without_pull_of_source_or_build(self):
+        self.use_ci_image()
+        result, state = self.run_update(active='blue')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(state['version_registered'])
+        self.assertFalse(any('build' in a or (a[0] == 'git' and 'pull' in a) for a in state['calls']))
+        self.assertFalse(any('prune' in a for a in state['calls']))
+        self.assertEqual((self.project / '.mfdeploy/green.commit').read_text().strip(), 'a' * 40)
+        self.assertEqual((self.project / '.mfdeploy/green.image').read_text().strip(), self.env['DEPLOY_IMAGE'])
+        self.assertFalse((self.project / '.mfdeploy/version-registration-pending').exists())
+
+    def test_ci_provenance_or_download_failure_prevents_migrations_and_promotion(self):
+        self.use_ci_image()
+        for scenario in ('commit-mismatch', 'infra-mismatch', 'pull-failure'):
+            with self.subTest(scenario=scenario):
+                result, state = self.run_update(scenario, active='blue')
+                self.assertNotEqual(result.returncode, 0)
+                self.assert_old_preserved(state)
+                self.assertFalse(any('--noinput' in a for a in state['calls']))
+
+    def test_version_failure_reports_active_release_and_keeps_retry_marker(self):
+        self.use_ci_image()
+        result, state = self.run_update('version-failure', active='blue')
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual((self.project / '.mfdeploy/active').read_text().strip(), 'green')
+        self.assertEqual((self.project / '.mfdeploy/version-registration-pending').read_text().strip(), 'a' * 40)
+        self.assertEqual(state['stopped'], 'app-myfin-blue')
+        self.assertIn('Deploy concluído, mas o registro de versão falhou', result.stderr)
+
+    def test_ci_rejects_mutable_image_reference_or_invalid_commit(self):
+        self.use_ci_image()
+        for key, value in (('DEPLOY_IMAGE', 'ghcr.io/fantunesdev/myfinance:latest'),
+                           ('DEPLOY_COMMIT', 'main')):
+            env = {**self.env, key: value}
+            result = subprocess.run(['sh', str(ROOT / 'mfupdate')], env=env, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(self.state_file.exists())
 
 
 class ComposeConfigurationTests(unittest.TestCase):

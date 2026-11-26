@@ -2,9 +2,64 @@
 set -eu
 
 BASEDIR="${BASEDIR:-/docker/myfinance}"
+UPDATE_TC=false
+UPDATE_DOCKER=false
+for ARG in "$@"; do
+    case "$ARG" in
+        -tc) UPDATE_TC=true ;;
+        -d) UPDATE_DOCKER=true ;;
+        -h|--help)
+            echo 'Uso: mfupdate [-tc] [-d]'
+            echo 'Sem argumentos: publica o MyFinance pelo fluxo habitual.'
+            echo '-tc: atualiza somente a branch atual de transaction_classifier.'
+            echo '-d: atualiza somente a branch atual do repositório Docker.'
+            echo 'As opções podem ser combinadas; não fazem build nem reiniciam serviços.'
+            exit 0 ;;
+        *) echo "Argumento desconhecido: $ARG. Use mfupdate --help." >&2; exit 1 ;;
+    esac
+done
+if [ "$UPDATE_TC" = true ] || [ "$UPDATE_DOCKER" = true ]; then
+    # O shell filho lê todo o programa antes do pull: -d pode alterar este arquivo.
+    # Usa o mesmo lock do deploy para não atualizar a infraestrutura durante uma troca.
+    exec sh -eu -c '
+        basedir=$1
+        update_tc=$2
+        update_docker=$3
+        state="$basedir/.mfdeploy"
+        mkdir -p "$state"
+        if ! mkdir "$state/lock" 2>/dev/null; then
+            echo "Outro mfupdate está em execução (ou deixou .mfdeploy/lock)." >&2
+            exit 1
+        fi
+        trap '\''rmdir "$state/lock"'\'' 0
+        trap '\''exit 130'\'' INT
+        trap '\''exit 143'\'' TERM
+        if [ "$update_tc" = true ]; then
+            echo "Atualizando a branch atual de transaction_classifier..."
+            git -C "$basedir/transaction_classifier" pull --ff-only
+        fi
+        if [ "$update_docker" = true ]; then
+            echo "Atualizando a branch atual do repositório Docker..."
+            git -C "$basedir" pull --ff-only
+        fi
+    ' sh "$BASEDIR" "$UPDATE_TC" "$UPDATE_DOCKER"
+fi
 TEST_TIMEOUT="${TEST_TIMEOUT:-60}"
 DRAIN_TIMEOUT="${DRAIN_TIMEOUT:-60}"
 BACKUP_KEEP="${BACKUP_KEEP:-3}"
+DEPLOY_IMAGE="${DEPLOY_IMAGE:-}"
+DEPLOY_COMMIT="${DEPLOY_COMMIT:-}"
+if [ -n "$DEPLOY_IMAGE" ]; then
+    printf '%s\n' "$DEPLOY_COMMIT" | grep -Eq '^[0-9a-f]{40}$' || {
+        echo 'DEPLOY_COMMIT precisa ser um SHA Git completo.' >&2; exit 1;
+    }
+    printf '%s\n' "$DEPLOY_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$' || {
+        echo 'DEPLOY_IMAGE precisa ser uma imagem GHCR fixada por digest.' >&2; exit 1;
+    }
+elif [ -n "$DEPLOY_COMMIT" ]; then
+    echo 'DEPLOY_COMMIT requer DEPLOY_IMAGE; não será construído outro código no servidor.' >&2
+    exit 1
+fi
 DEPLOY_ID="$(date +%Y%m%d-%H%M%S)-$$"
 BKP_IMAGE="docker_myfinance_app-myfin-bkp:$DEPLOY_ID"
 RELEASE_IMAGE="myfinance-release:$DEPLOY_ID"
@@ -74,12 +129,7 @@ clean_docker_images() {
         done
     fi
 
-    # Não usa image prune -a, system prune ou volume prune: mantém imagens com
-    # tag de outros serviços e todos os volumes, inclusive o banco de dados.
-    docker builder prune -a -f || \
-        echo 'Aviso: não foi possível limpar o cache de build.' >&2
-    docker image prune -f || \
-        echo 'Aviso: não foi possível limpar as imagens sem tag.' >&2
+    # A limpeza global de imagens/cache pertence à manutenção do host.
 }
 
 cleanup() {
@@ -130,9 +180,23 @@ docker tag "$ACTUAL_IMAGE" "$BKP_IMAGE"
 echo "Backup da imagem atual: $BKP_IMAGE"
 clean_docker_images
 
-git -C myfinance pull --ff-only
-compose --profile legacy build --no-cache app-myfin
-VALIDATED_IMAGE=$(docker image inspect --format '{{.Id}}' myfinance-app-myfin)
+if [ -n "$DEPLOY_IMAGE" ]; then
+    # Confere a proveniência antes de tocar no slot inativo ou no banco.
+    docker pull "$DEPLOY_IMAGE"
+    IMAGE_COMMIT=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$DEPLOY_IMAGE")
+    if [ "$IMAGE_COMMIT" != "$DEPLOY_COMMIT" ]; then
+        echo 'O commit da imagem não corresponde ao commit aprovado pelo CI.' >&2; exit 1
+    fi
+    IMAGE_INFRA=$(docker image inspect --format '{{index .Config.Labels "io.myfinance.infrastructure.revision"}}' "$DEPLOY_IMAGE")
+    if [ "$IMAGE_INFRA" != "$(git rev-parse HEAD)" ]; then
+        echo 'A infraestrutura da VM difere da usada no CI. Atualize o checkout antes de publicar.' >&2; exit 1
+    fi
+    VALIDATED_IMAGE=$(docker image inspect --format '{{.Id}}' "$DEPLOY_IMAGE")
+else
+    git -C myfinance pull --ff-only
+    compose --profile legacy build --no-cache app-myfin
+    VALIDATED_IMAGE=$(docker image inspect --format '{{.Id}}' myfinance-app-myfin)
+fi
 docker tag "$VALIDATED_IMAGE" "$RELEASE_IMAGE"
 if [ "$NEXT" = blue ]; then NEXT_IP=172.18.0.8; else NEXT_IP=172.18.0.9; fi
 # Nunca remove o slot ativo. O inativo pode ter sobrado de uma execução interrompida.
@@ -190,7 +254,11 @@ if [ "$(docker inspect --format '{{.Image}}' "$CANDIDATE")" != "$VALIDATED_IMAGE
     echo 'A imagem iniciada difere da imagem validada.' >&2; exit 1
 fi
 
-sudo install -m 0755 "$BASEDIR/myfinance.init.d" /etc/init.d/myfinance
+if [ -n "$DEPLOY_IMAGE" ]; then
+    sudo -n install -m 0755 "$BASEDIR/myfinance.init.d" /etc/init.d/myfinance
+else
+    sudo install -m 0755 "$BASEDIR/myfinance.init.d" /etc/init.d/myfinance
+fi
 
 # Na primeira adoção, muda o bind mount de arquivo para diretório.
 # Preserva inicialmente o upstream legado; só troca após a preparação do proxy.
@@ -233,6 +301,13 @@ fi
 # Retira o reinício automático do antigo antes da drenagem, inclusive após reboot.
 docker update --restart=no "$CURRENT_CONTAINER"
 COMMITTED=true
+if [ -n "$DEPLOY_IMAGE" ]; then
+    printf '%s\n' "$DEPLOY_COMMIT" > "$STATE/$NEXT.commit"
+    printf '%s\n' "$DEPLOY_IMAGE" > "$STATE/$NEXT.image"
+else
+    # Um deploy manual não deve herdar a identificação de uma imagem anterior.
+    rm -f "$STATE/$NEXT.commit" "$STATE/$NEXT.image"
+fi
 echo "Tráfego direcionado para $NEXT. Aguardando até ${DRAIN_TIMEOUT}s pelas conexões antigas..."
 # Os workers antigos do Nginx conservam requisições e WebSockets durante o reload.
 DEADLINE=$(($(date +%s) + DRAIN_TIMEOUT))
@@ -245,5 +320,13 @@ docker rm "$CURRENT_CONTAINER"
 # Reinicia somente o worker, na mesma imagem da aplicação; banco e Redis permanecem.
 current_compose up -d --no-deps investment-history
 current_compose up -d --no-deps password-reset-email
+if [ -n "$DEPLOY_IMAGE" ]; then
+    printf '%s\n' "$DEPLOY_COMMIT" > "$STATE/version-registration-pending"
+    if ! docker exec -i "$CANDIDATE" python - "$DEPLOY_COMMIT" < "$BASEDIR/deploy/register_version.py"; then
+        echo 'Deploy concluído, mas o registro de versão falhou. Consulte .mfdeploy/version-registration-pending.' >&2
+        exit 2
+    fi
+    rm -f "$STATE/version-registration-pending"
+fi
 echo "Atualização concluída. Slot ativo: $NEXT; imagem: $VALIDATED_IMAGE"
 clean_docker_images
