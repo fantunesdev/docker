@@ -1,4 +1,4 @@
-FROM python:3.13-alpine
+FROM python:3.15.2-alpine
 
 # Dependências
 RUN apk update && apk add --no-cache \
@@ -11,11 +11,12 @@ RUN apk update && apk add --no-cache \
     mariadb-connector-c-dev \
     mariadb-dev \
     postgresql-dev \
+    file \
     vim \
     curl
 
 # Instalação do Poetry
-ENV POETRY_VERSION=1.8.2
+ENV POETRY_VERSION=2.5.2
 RUN curl -sSL https://install.python-poetry.org | python3 - && \
     ln -s /root/.local/bin/poetry /usr/local/bin/poetry
 
