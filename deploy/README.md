@@ -42,11 +42,10 @@ depois dos testes, com dependências do lock e identificação OCI do commit.
    chave pública no usuário de deploy da VM e a chave de host verificada no
    `known_hosts`. Valide `ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes
    producao true`. O pipeline não aceita senha ou chave de host desconhecida.
-6. O usuário remoto precisa de acesso ao Docker, ao checkout, aos estáticos e
-   ao diretório de backups. Precisa também executar sem senha o comando
-   `sudo -n install -m 0755 /docker/myfinance/myfinance.init.d
-   /etc/init.d/myfinance` já usado pelo deploy. A aplicação atual deve estar
-   rodando. A VM precisa de acesso HTTPS ao GHCR.
+6. O usuário remoto precisa de acesso ao Docker, ao checkout, ao estado
+   administrativo `.mfdeploy` e ao diretório de backups. Prepare o serviço e as
+   permissões uma vez, conforme abaixo. O deploy não instala serviços nem chama
+   `sudo`. A aplicação atual deve estar rodando. A VM precisa de HTTPS para GHCR.
 7. Habilite GitHub Actions e a criação de packages no repositório. O workflow
    usa `GITHUB_TOKEN` com `packages: write` no CI e `packages: read` no deploy;
    o pacote deve permitir acesso ao repositório MyFinance. O token temporário
@@ -58,6 +57,52 @@ for privado, configure o secret `MYFINANCE_INFRA_TOKEN` com um token que tenha
 somente acesso de leitura a esse repositório. O workflow usa esse secret quando
 disponível. O token padrão do MyFinance não concede acesso automático a outro
 repositório privado; PRs de forks não recebem o secret.
+
+## Preparação administrativa do servidor
+
+O serviço de boot é instalado uma vez por um administrador e atualizado
+manualmente quando seu arquivo mudar. Em Alpine/OpenRC:
+
+```sh
+sudo install -m 0755 /docker/myfinance/myfinance.init.d /etc/init.d/myfinance
+```
+
+Em systemd, use `myfinance.service` com os caminhos ajustados ao checkout,
+instalando-o em `/etc/systemd/system/myfinance.service` e executando
+`sudo systemctl daemon-reload`. O deploy habitual não altera `/etc` e não
+precisa de uma regra `NOPASSWD` para instalar serviços.
+
+Se o estado foi criado por root, ajuste somente os diretórios administrativos e
+os arquivos de controle, sem outro deploy em execução. Para o usuário `fernando`:
+
+```sh
+deploy_base=/docker/myfinance
+deploy_owner=fernando
+deploy_group=$(id -gn "$deploy_owner")
+sudo mkdir -p "$deploy_base/.mfdeploy/nginx"
+sudo chown "$deploy_owner:$deploy_group" "$deploy_base/.mfdeploy"
+sudo chmod u+rwx "$deploy_base/.mfdeploy"
+sudo find "$deploy_base/.mfdeploy" -maxdepth 1 -type f -exec chown "$deploy_owner:$deploy_group" {} +
+sudo find "$deploy_base/.mfdeploy" -maxdepth 1 -type f -exec chmod u+rw {} +
+for relative in nginx assets assets/blue assets/green assets/legacy; do
+    if [ -d "$deploy_base/.mfdeploy/$relative" ]; then
+        sudo chown "$deploy_owner:$deploy_group" "$deploy_base/.mfdeploy/$relative"
+        sudo chmod u+rwx "$deploy_base/.mfdeploy/$relative"
+    fi
+done
+if [ -f "$deploy_base/.mfdeploy/nginx/default.conf" ]; then
+    sudo chmod a+r "$deploy_base/.mfdeploy/nginx/default.conf"
+fi
+```
+
+Não aplique `chown -R` no checkout inteiro: o banco, mídia e estáticos gerados
+pelos containers têm permissões próprias. Prepare também acesso ao checkout
+Git e ao diretório de backups para o usuário de deploy. O `mfupdate` verifica
+as permissões do estado antes de tocar no Docker, fazer build ou migrations e
+interrompe com o caminho problemático quando é preciso corrigir o servidor.
+Configurações legíveis do Nginx podem pertencer a root: a troca usa renomeação
+sem confirmação, exigindo escrita no diretório, não no arquivo substituído.
+O `mfcompose` publica a configuração com modo `0644`, inclusive durante o boot.
 
 Referências oficiais: [runners próprios](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/add-runners),
 [sintaxe dos workflows](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax).

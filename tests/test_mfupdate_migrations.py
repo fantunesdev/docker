@@ -1,5 +1,6 @@
 import json
 import os
+import pty
 import re
 from pathlib import Path
 import shutil
@@ -64,6 +65,8 @@ if name in ('docker', 'docker-compose'):
     elif args[0] == 'stop': state['stopped'] = args[-1]
 elif name == 'git' and args == ['rev-parse', 'HEAD']:
     print('b' * 40)
+elif name == 'sudo':
+    status = 99
 state_file.write_text(json.dumps(state))
 sys.exit(status)
 '''
@@ -96,7 +99,7 @@ class MigrationDeploymentTests(unittest.TestCase):
                     'BASEDIR': str(self.project), 'TEST_TIMEOUT': '3', 'DRAIN_TIMEOUT': '1',
                     'MOCK_STATE': str(self.state_file), 'MIGRATION_BACKUP_DIR': str(self.backups)}
 
-    def run_update(self, scenario='pending', active='legacy'):
+    def run_update(self, scenario='pending', active='legacy', readonly_proxy=False, terminal_input=False):
         self.state_file.write_text(json.dumps({'scenario': scenario, 'calls': [],
                                               'current': 'app-myfin' if active == 'legacy' else f'app-myfin-{active}'}))
         if active != 'legacy':
@@ -106,8 +109,23 @@ class MigrationDeploymentTests(unittest.TestCase):
             (state_dir / f'{active}.yml').write_text('services: {}\n')
             (state_dir / 'nginx/default.conf').write_text('previous nginx config\n')
             (state_dir / f'{active}.nginx.conf').write_text('previous nginx config\n')
-        result = subprocess.run(['sh', str(ROOT / 'mfupdate')], env=self.env,
-                                text=True, capture_output=True, timeout=20)
+        if readonly_proxy:
+            config = self.project / '.mfdeploy/nginx/default.conf'
+            config.parent.mkdir(parents=True, exist_ok=True)
+            if not config.exists():
+                config.write_text('previous nginx config\n')
+            config.chmod(0o444)
+        if terminal_input:
+            master, slave = pty.openpty()
+            try:
+                result = subprocess.run(['sh', str(ROOT / 'mfupdate')], env=self.env,
+                                        stdin=slave, text=True, capture_output=True, timeout=20)
+            finally:
+                os.close(master)
+                os.close(slave)
+        else:
+            result = subprocess.run(['sh', str(ROOT / 'mfupdate')], env=self.env,
+                                    text=True, capture_output=True, timeout=20)
         return result, json.loads(self.state_file.read_text())
 
     def assert_old_preserved(self, state):
@@ -136,6 +154,43 @@ class MigrationDeploymentTests(unittest.TestCase):
         self.assertEqual((self.project / '.mfdeploy/assets/legacy/static/old.css').read_text(), 'old-style')
         self.assertFalse(any('down' in a or 'rc-service' in a for a in calls))
         self.assertFalse((self.project / '.mfdeploy/lock').exists())
+        self.assertFalse(any(call[0] == 'sudo' for call in calls))
+
+    def test_readonly_proxy_is_replaced_without_terminal_confirmation(self):
+        for active, expected in (('legacy', 'blue'), ('blue', 'green')):
+            with self.subTest(active=active):
+                result, state = self.run_update(active=active, readonly_proxy=True, terminal_input=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((self.project / '.mfdeploy/active').read_text().strip(), expected)
+                self.assertNotIn('overwrite', result.stderr)
+                self.assertFalse(any(call[0] == 'sudo' for call in state['calls']))
+
+    def test_permission_failure_precedes_docker_build_and_migrations(self):
+        if os.geteuid() == 0:
+            self.skipTest('A verificação de permissões exige usuário sem root')
+        state_dir = self.project / '.mfdeploy'
+        state_dir.mkdir()
+        for relative, is_directory in (('nginx', True), ('assets/blue', True), ('previous-nginx.conf', False)):
+            with self.subTest(path=relative):
+                path = state_dir / relative
+                if is_directory:
+                    path.mkdir(parents=True)
+                    path.chmod(0o555)
+                else:
+                    path.write_text('old state')
+                    path.chmod(0o444)
+                try:
+                    result, state = self.run_update()
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(state['calls'], [])
+                    self.assertIn(str(path), result.stderr)
+                    self.assertFalse((state_dir / 'lock').exists())
+                finally:
+                    path.chmod(0o755 if is_directory else 0o644)
+                    if is_directory:
+                        path.rmdir()
+                    else:
+                        path.unlink()
 
     def test_up_to_date_database_does_not_dump_or_apply_migrations(self):
         result, state = self.run_update('no-migrations')
@@ -168,7 +223,7 @@ class MigrationDeploymentTests(unittest.TestCase):
     def test_failed_cutover_restores_proxy_and_persisted_state(self):
         for scenario in ('nginx-config-failure', 'reload-failure', 'proxy-failure'):
             with self.subTest(scenario=scenario):
-                result, state = self.run_update(scenario, active='blue')
+                result, state = self.run_update(scenario, active='blue', readonly_proxy=True, terminal_input=True)
                 self.assertNotEqual(result.returncode, 0)
                 self.assert_old_preserved(state)
                 self.assertEqual((self.project / '.mfdeploy/active').read_text().strip(), 'blue')
@@ -200,11 +255,13 @@ class MigrationDeploymentTests(unittest.TestCase):
                 result, state = self.run_update(active='blue')
                 self.assertEqual(result.returncode, 0, result.stderr)
                 (self.project / '.mfdeploy/nginx/default.conf').write_text('interrupted switch\n')
+                (self.project / '.mfdeploy/nginx/default.conf').chmod(0o444)
                 env = {**self.env, 'MOCK_V1': v1}
                 result = subprocess.run([str(self.project / 'mfcompose'), 'up', '-d'], env=env, capture_output=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual((self.project / '.mfdeploy/nginx/default.conf').read_text(),
                                  (self.project / '.mfdeploy/green.nginx.conf').read_text())
+                self.assertEqual((self.project / '.mfdeploy/nginx/default.conf').stat().st_mode & 0o777, 0o644)
                 call = next(call for call in reversed(json.loads(self.state_file.read_text())['calls']) if 'up' in call)
                 self.assertEqual(call[-2:], ['up', '-d'])
                 self.assertEqual(call[call.index('--profile') + 1], 'green')

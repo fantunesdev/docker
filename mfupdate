@@ -87,6 +87,25 @@ done
 cd "$BASEDIR"
 STATE="$BASEDIR/.mfdeploy"
 mkdir -p "$STATE"
+# Verifica o estado administrativo antes de backup, build ou migrations.
+# Os estáticos gerados pelos containers não precisam pertencer ao usuário do host.
+for DIRECTORY in "$STATE" "$STATE/nginx" "$STATE/assets" \
+    "$STATE/assets/blue" "$STATE/assets/green" "$STATE/assets/legacy"; do
+    if [ -e "$DIRECTORY" ] && { [ ! -d "$DIRECTORY" ] || [ ! -w "$DIRECTORY" ] || [ ! -x "$DIRECTORY" ]; }; then
+        echo "Sem permissão para gerenciar $DIRECTORY. Prepare as permissões conforme deploy/README.md antes do deploy." >&2
+        exit 1
+    fi
+done
+for FILE in "$STATE"/*; do
+    if [ -f "$FILE" ] && { [ ! -r "$FILE" ] || [ ! -w "$FILE" ]; }; then
+        echo "Sem permissão para gerenciar $FILE. Prepare as permissões conforme deploy/README.md antes do deploy." >&2
+        exit 1
+    fi
+done
+if [ -e "$STATE/nginx/default.conf" ] && [ ! -r "$STATE/nginx/default.conf" ]; then
+    echo "Sem permissão para ler $STATE/nginx/default.conf. Consulte deploy/README.md." >&2
+    exit 1
+fi
 if ! mkdir "$STATE/lock" 2>/dev/null; then
     echo 'Outro mfupdate está em execução (ou deixou .mfdeploy/lock após uma interrupção abrupta).' >&2
     exit 1
@@ -146,7 +165,8 @@ cleanup() {
     set +e
     if [ "$SWITCHING" = true ] && [ "$COMMITTED" != true ]; then
         echo 'Restaurando o destino anterior do Nginx...' >&2
-        cp "$STATE/previous-nginx.conf" "$STATE/nginx/default.conf"
+        cp "$STATE/previous-nginx.conf" "$STATE/rollback-nginx.conf"
+        mv -f "$STATE/rollback-nginx.conf" "$STATE/nginx/default.conf"
         if [ "$ACTIVE" = legacy ]; then rm -f "$STATE/active";
         else printf '%s\n' "$ACTIVE" > "$STATE/active"; fi
         docker update --restart=unless-stopped "$CURRENT_CONTAINER" >/dev/null
@@ -262,16 +282,11 @@ if [ "$(docker inspect --format '{{.Image}}' "$CANDIDATE")" != "$VALIDATED_IMAGE
     echo 'A imagem iniciada difere da imagem validada.' >&2; exit 1
 fi
 
-if [ -n "$DEPLOY_IMAGE" ]; then
-    sudo -n install -m 0755 "$BASEDIR/myfinance.init.d" /etc/init.d/myfinance
-else
-    sudo install -m 0755 "$BASEDIR/myfinance.init.d" /etc/init.d/myfinance
-fi
-
 # Na primeira adoção, muda o bind mount de arquivo para diretório.
 # Preserva inicialmente o upstream legado; só troca após a preparação do proxy.
 if [ "$ACTIVE" = legacy ]; then
-    cp "$BASEDIR/nginx/default.conf" "$STATE/nginx/default.conf"
+    cp "$BASEDIR/nginx/default.conf" "$STATE/legacy-nginx.conf"
+    mv -f "$STATE/legacy-nginx.conf" "$STATE/nginx/default.conf"
     mkdir -p "$STATE/assets/legacy/static"
     # Copia conteúdo e links sem tentar preservar donos dos arquivos do container.
     cp -R "$BASEDIR/static/." "$STATE/assets/legacy/static/"
@@ -284,15 +299,16 @@ if [ "$ACTIVE" = legacy ]; then
     fi
 fi
 cp "$STATE/nginx/default.conf" "$STATE/previous-nginx.conf"
+chmod u+w "$STATE/previous-nginx.conf"
 sed -e "s/@UPSTREAM@/$NEXT_IP/g" -e "s/@ACTIVE@/$NEXT/g" -e "s/@PREVIOUS@/$PREVIOUS/g" \
     "$BASEDIR/nginx/bluegreen.conf.template" > "$STATE/$NEXT.nginx.conf"
 cp "$STATE/$NEXT.nginx.conf" "$STATE/next-nginx.conf"
 SWITCHING=true
-mv "$STATE/next-nginx.conf" "$STATE/nginx/default.conf"
+mv -f "$STATE/next-nginx.conf" "$STATE/nginx/default.conf"
 docker exec nginx-myfin nginx -t
 # Persiste antes do reload: um reboot já encontra o novo serviço e sua imagem fixa.
 printf '%s\n' "$NEXT" > "$STATE/active.next"
-mv "$STATE/active.next" "$STATE/active"
+mv -f "$STATE/active.next" "$STATE/active"
 docker exec nginx-myfin nginx -s reload
 # Valida também o caminho pelo proxy; não basta o container responder diretamente.
 DEADLINE=$(($(date +%s) + TEST_TIMEOUT))

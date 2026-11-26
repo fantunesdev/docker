@@ -373,8 +373,11 @@ seleção persistida. Ao executar `up`, o wrapper reconcilia o upstream com o sl
 salvo e recarrega o Nginx, inclusive se houve interrupção durante a troca.
 O Compose de desenvolvimento continua independente.
 
-O `mfupdate` instala o serviço `myfinance.init.d` em `/etc/init.d/myfinance`
-antes da troca do proxy. O OpenRC usa `mfcompose` para iniciar e parar o ambiente,
+Instale o serviço `myfinance.init.d` em `/etc/init.d/myfinance` uma vez, na
+preparação administrativa do servidor. O `mfupdate` não instala serviços nem
+executa `sudo` durante o deploy. A instalação e a correção das permissões do
+estado estão em [deploy/README.md](deploy/README.md#preparação-administrativa-do-servidor).
+O OpenRC usa `mfcompose` para iniciar e parar o ambiente,
 preservando as redes existentes durante o boot e restaurando o slot ativo.
 O arquivo `myfinance.service` também usa o wrapper; ajuste seus caminhos e
 `BASEDIR` ao instalar em um servidor com systemd.

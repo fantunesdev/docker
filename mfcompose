@@ -11,8 +11,14 @@ if [ -f .mfdeploy/active ]; then
     case "$ACTIVE" in blue|green) ;; *) echo 'Estado de deploy inválido.' >&2; exit 1 ;; esac
     if [ "$RESTORE_PROXY" = true ]; then
         # Repara uma interrupção entre a publicação do upstream e a seleção do slot.
-        cp ".mfdeploy/$ACTIVE.nginx.conf" .mfdeploy/nginx/restore.conf.tmp
-        mv .mfdeploy/nginx/restore.conf.tmp .mfdeploy/nginx/default.conf
+        RESTORE_TEMP=$(mktemp "$BASEDIR/.mfdeploy/nginx/.restore.XXXXXX")
+        trap 'rm -f "$RESTORE_TEMP"' 0
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+        cp ".mfdeploy/$ACTIVE.nginx.conf" "$RESTORE_TEMP"
+        # O OpenRC pode executar como root; o usuário de deploy precisa ler depois.
+        chmod 0644 "$RESTORE_TEMP"
+        mv -f "$RESTORE_TEMP" .mfdeploy/nginx/default.conf
     fi
     set -- -f "$BASEDIR/.mfdeploy/$ACTIVE.yml" "$@"
 fi
