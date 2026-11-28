@@ -127,7 +127,7 @@ services:
   mysql-myfin:
     container_name: mysql-myfin
     restart: unless-stopped
-    image: mysql:latest
+    image: mysql:9.7.4.1
     environment:
       MYSQL_ROOT_PASSWORD: "${MYFIN_MYSQL_ROOT_PASSWORD}"
       MYSQL_USER: "${MYFIN_MYSQL_USER}"
